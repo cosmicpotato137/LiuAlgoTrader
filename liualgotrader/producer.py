@@ -1,6 +1,29 @@
+"""Get market data from data providers and pump it to the consumers.
+
+Functions
+---------
+get_new_symbols_and_queues
+    Return untracked symbols and assign queues.
+subscribe_new_symbols
+    Subscribe to market data for new symbols.
+scanners_iteration
+    Process one batch of scanner results.
+scanner_input
+    Subscribe to scanner results until cancelled.
+trade_run
+    Run the configured trader.
+dispense_strategies
+    Send trade plan entries to the consumers.
+tradeplan_scanner
+    Dispatch new trade plan entries every five minutes.
+run
+    Start the market data stream.
+producer_async_main
+    Set up the producer and run its tasks.
+producer_main
+    Run the producer process.
 """
-Get Market data from Data Providers and pump to consumers
-"""
+
 import asyncio
 import inspect
 import json
@@ -31,6 +54,20 @@ symbol_strategy: Dict = {}
 def get_new_symbols_and_queues(
     symbols_details: Dict, queues: List[Queue], num_consumer_processes: int
 ) -> List[str]:
+    """Return the symbols not yet tracked and assign each one a queue.
+
+    Record the target strategy of each new symbol and map it to a randomly
+    chosen queue in the streaming instance. Leave the tracked list unchanged.
+
+    Parameters
+    ----------
+    symbols_details: Dict
+        The scanner results, each with a symbol and a target strategy name.
+    queues: List[Queue]
+        The consumer queues.
+    num_consumer_processes: int
+        The number of queues to choose from.
+    """
     global symbol_strategy
     global symbols
 
@@ -48,6 +85,13 @@ def get_new_symbols_and_queues(
 
 
 async def subscribe_new_symbols(new_symbols: List[str]):
+    """Subscribe the stream to aggregates and trades for new_symbols.
+
+    Parameters
+    ----------
+    new_symbols: List[str]
+        The symbols to subscribe to.
+    """
     await streaming_factory().get_instance().subscribe(
         new_symbols,
         [
@@ -63,6 +107,24 @@ async def scanners_iteration(
     queues: List[Queue],
     num_consumer_processes: int,
 ):
+    """Subscribe to the new symbols in one batch of scanner results.
+
+    Save the new symbols to the trending tickers table and add them to the
+    tracked list.
+
+    Parameters
+    ----------
+    scanner_queue: Queue
+        The queue of scanner results.
+    queues: List[Queue]
+        The consumer queues.
+    num_consumer_processes: int
+        The number of consumer queues in use.
+
+    Raises
+    ------
+    Raise Empty if no results arrive within a second.
+    """
     global symbols
     symbols_details = scanner_queue.get(timeout=1)
     if len(
@@ -87,6 +149,20 @@ async def scanner_input(
     queues: List[Queue],
     num_consumer_processes: int,
 ) -> None:
+    """Subscribe to the symbols reported by the scanners until cancelled.
+
+    Wait 30 seconds when no results are available. Log other exceptions and
+    continue.
+
+    Parameters
+    ----------
+    scanner_queue: Queue
+        The queue of scanner results.
+    queues: List[Queue]
+        The consumer queues.
+    num_consumer_processes: int
+        The number of consumer queues in use.
+    """
     tlog("scanner_input() task starting ")
 
     while True:
@@ -117,6 +193,13 @@ async def scanner_input(
 
 
 async def trade_run(qm: QueueMapper) -> None:
+    """Run the configured trader.
+
+    Parameters
+    ----------
+    qm: QueueMapper
+        The queue mapper passed to the trader.
+    """
     at = trader_factory(qm)
     tlog(f"trade_run() starting using {at} trading")
     await at.run()
@@ -126,6 +209,17 @@ async def trade_run(qm: QueueMapper) -> None:
 async def dispense_strategies(
     consumer_queues: List[Queue], tradeplan_entries: List[TradePlan]
 ) -> None:
+    """Send each trade plan entry to a randomly chosen consumer queue.
+
+    Log a failure to send an entry and continue with the rest.
+
+    Parameters
+    ----------
+    consumer_queues: List[Queue]
+        The consumer queues.
+    tradeplan_entries: List[TradePlan]
+        The trade plan entries to send.
+    """
     for tradeplan in tradeplan_entries:
         happy_consumer = consumer_queues[
             random.SystemRandom().randint(0, len(consumer_queues) - 1)
@@ -150,6 +244,16 @@ async def dispense_strategies(
 async def tradeplan_scanner(
     consumer_queues: List[Queue],
 ) -> None:
+    """Dispatch new trade plan entries to the consumers every five minutes.
+
+    Send the active entries created since the previous scan. Log exceptions and
+    continue.
+
+    Parameters
+    ----------
+    consumer_queues: List[Queue]
+        The consumer queues.
+    """
     tlog("tradeplan_scanner() task starting ")
 
     last_scan: datetime = datetime.utcnow()
@@ -184,6 +288,17 @@ async def run(
     queues: List[Queue],
     qm: QueueMapper,
 ) -> None:
+    """Start the market data stream and subscribe to the tracked symbols.
+
+    Map each tracked symbol in qm to its assigned consumer queue.
+
+    Parameters
+    ----------
+    queues: List[Queue]
+        The consumer queues.
+    qm: QueueMapper
+        The queue mapper of the stream.
+    """
     global queue_id_hash
 
     ps = streaming_factory()(qm)
@@ -206,6 +321,20 @@ async def producer_async_main(
     scanner_queue: Queue,
     num_consumer_processes: int,
 ):
+    """Set up the producer and run its tasks until they finish.
+
+    Create the database connection pool, start the market data stream and the
+    trader, and collect task exceptions instead of raising them.
+
+    Parameters
+    ----------
+    queues: List[Queue]
+        The consumer queues.
+    scanner_queue: Queue
+        The queue of scanner results.
+    num_consumer_processes: int
+        The number of consumer queues in use.
+    """
     await create_db_connection(str(config.dsn))
     qm = QueueMapper(queue_list=queues)
     await run(queues=queues, qm=qm)
@@ -243,6 +372,24 @@ def producer_main(
     scanner_queue: Queue,
     num_consumer_processes: int,
 ) -> None:
+    """Run the producer process until its tasks complete.
+
+    Set the batch identifier in config. Log exceptions and keyboard interrupts
+    instead of raising them.
+
+    Parameters
+    ----------
+    unique_id: str
+        The batch identifier of the run.
+    queues: List[Queue]
+        The consumer queues.
+    conf_dict: Dict
+        Unused.
+    scanner_queue: Queue
+        The queue of scanner results.
+    num_consumer_processes: int
+        The number of consumer queues in use.
+    """
     tlog(f"*** producer_main() starting w pid {os.getpid()} ***")
     try:
         config.batch_id = unique_id

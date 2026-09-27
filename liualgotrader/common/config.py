@@ -1,3 +1,16 @@
+"""Framework-wide configuration settings.
+
+Most settings are module-level variables, many read from environment
+variables at import time, such as the data connector, broker, API
+credentials, database DSN and performance parameters. Shared run-time
+values, such as the database connection pool and batch ID, are set later.
+
+Classes
+-------
+polygon
+    Configuration settings specific to Polygon data.
+"""
+
 import os
 from dataclasses import dataclass
 from typing import List, Optional
@@ -100,4 +113,12 @@ polygon_seconds_timeout = 60
 
 @dataclass
 class polygon:
+    """Configuration settings specific to Polygon data.
+
+    Attributes
+    ----------
+    MAX_DAYS_TO_LOAD: int
+        The maximum number of days of data to load.
+    """
+
     MAX_DAYS_TO_LOAD: int = 7

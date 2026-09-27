@@ -1,6 +1,71 @@
+"""Execute strategies on streaming data received from the producer.
+
+Functions
+---------
+end_time
+    Record the end of every strategy's algorithm run.
+get_position
+    Return the position a trader reports for a symbol.
+execute_run_all_results
+    Execute the actions returned by run_all.
+do_strategy_all
+    Run a strategy on all its symbols and execute the result.
+cancel_lingering_orders
+    Reconcile or cancel stale open orders.
+periodic_runner
+    Run the all-symbol strategies every five minutes.
+should_cancel_order
+    Return whether an order is at least a minute old.
+save
+    Save a trade record to the database.
+do_callbacks
+    Clear stored indicators and notify a strategy of a fill.
+update_partially_filled_order
+    Apply a partial fill to the trading state.
+update_filled_order
+    Apply a complete fill and close the open order.
+handle_trade_update_for_order
+    Apply a trade update for an open order.
+handle_trade_update_wo_order
+    Log a trade update without an open order.
+handle_trade_update
+    Dispatch a trade update.
+handle_quote
+    Update the volume order imbalance from a quote.
+aggregate_bar_data
+    Merge a streamed bar into the minute data.
+order_inflight
+    Reconcile or cancel a stale open order.
+submit_order
+    Submit a day order described by a strategy.
+update_trading_data
+    Register a newly submitted order.
+execute_strategy_result
+    Submit and record the order of a strategy.
+do_strategy
+    Run a strategy on one symbol.
+do_strategies
+    Run the eligible per-symbol strategies on one symbol.
+handle_aggregate
+    Process an aggregate bar and run the strategies.
+handle_data_queue_msg
+    Handle a market data message.
+queue_consumer
+    Consume and dispatch messages from the data queue.
+create_strategies_from_file
+    Create the strategies in the configuration.
+load_symbol_position
+    Return the net open positions of a portfolio.
+create_strategies_from_db
+    Create the strategies in the trade plan.
+handle_new_strategy
+    Create a strategy requested at run time.
+consumer_async_main
+    Set up the consumer and run its tasks.
+consumer_main
+    Run a consumer process.
 """
-Execute Strategies on streaming data received from the Producer
-"""
+
 import asyncio
 import math
 import os
@@ -39,6 +104,13 @@ nyc = timezone("America/New_York")
 
 
 async def end_time(reason: str):
+    """Record the end of each loaded strategy's algorithm run in the database.
+
+    Parameters
+    ----------
+    reason: str
+        The end reason to store with each run.
+    """
     for s in trading_data.strategies:
         tlog(f"updating end time for strategy {s.name}")
         await s.algo_run.update_end_time(
@@ -47,6 +119,19 @@ async def end_time(reason: str):
 
 
 def get_position(trader: Trader, symbol: str) -> float:
+    """Return the position quantity that trader reports for symbol.
+
+    Parameters
+    ----------
+    trader: Trader
+        The trader to ask.
+    symbol: str
+        The symbol to look up.
+
+    Returns
+    -------
+    Return zero if the trader raises an exception.
+    """
     try:
         return trader.get_position(symbol)
     except Exception:
@@ -59,6 +144,22 @@ async def execute_run_all_results(
     trader: Trader,
     data_loader: DataLoader,
 ):
+    """Execute the per-symbol actions returned by the run_all of a strategy.
+
+    Place the orders through the broker and on behalf of the external account
+    of the strategy's portfolio, when it has one.
+
+    Parameters
+    ----------
+    strategy: Strategy
+        The strategy that produced the actions.
+    run_all_results: Dict[str, Dict]
+        A mapping of symbol to action details.
+    trader: Trader
+        The trader to use unless the portfolio names a broker.
+    data_loader: DataLoader
+        The loader of market data.
+    """
     external_account_id = None
     if hasattr(strategy, "portfolio_id"):
         (
@@ -88,6 +189,25 @@ async def do_strategy_all(
     symbols: List[str],
     carrier=None,
 ):
+    """Run the run_all method of strategy and execute the resulting actions.
+
+    Parameters
+    ----------
+    data_loader: DataLoader
+        The loader of market data.
+    trader: Trader
+        The trader used for positions and orders.
+    strategy: Strategy
+        The strategy to run.
+    symbols: List[str]
+        The symbols to pass with their current positions.
+    carrier, default None
+        Unused.
+
+    Raises
+    ------
+    Log and re-raise any exception.
+    """
     try:
         now = datetime.now(nyc)
         symbols_position = {
@@ -115,6 +235,15 @@ async def do_strategy_all(
 
 
 async def cancel_lingering_orders(trader: Trader):
+    """Reconcile or cancel stale open orders once a minute until cancelled.
+
+    Act only while the market is open.
+
+    Parameters
+    ----------
+    trader: Trader
+        The trader used to check and cancel orders.
+    """
     tlog("cancel_lingering_orders() task starting")
 
     while True:
@@ -139,6 +268,18 @@ async def cancel_lingering_orders(trader: Trader):
 
 
 async def periodic_runner(data_loader: DataLoader, trader: Trader) -> None:
+    """Run the all-symbol strategies every five minutes until cancelled.
+
+    Run each strategy whose should_run_all returns True on the symbols it last
+    traded. Log exceptions and stop instead of raising them.
+
+    Parameters
+    ----------
+    data_loader: DataLoader
+        The loader of market data.
+    trader: Trader
+        The trader used for positions and orders.
+    """
     try:
         while True:
             tlog("periodic_runner() task starting")
@@ -186,6 +327,15 @@ async def periodic_runner(data_loader: DataLoader, trader: Trader) -> None:
 
 
 async def should_cancel_order(order: Order, market_clock: datetime) -> bool:
+    """Return whether order has been outstanding for at least a minute.
+
+    Parameters
+    ----------
+    order: Order
+        The open order.
+    market_clock: datetime
+        The current market time.
+    """
     # Make sure the order's not too old
     submitted_at = order.submitted_at.astimezone(market_clock.tzinfo)
     order_lifetime = market_clock - submitted_at
@@ -204,6 +354,32 @@ async def save(
     now: str,
     trade_fee=0.0,
 ) -> None:
+    """Save a trade record for symbol to the database.
+
+    Attach the record to the algorithm run of the strategy that owns the open
+    order of symbol, with the recorded stop and target prices.
+
+    Parameters
+    ----------
+    symbol: str
+        The traded symbol.
+    new_qty: float
+        The traded quantity.
+    last_op: str
+        The operation name, such as buy or sell.
+    price: float
+        The trade price.
+    indicators: Dict[Any, Any]
+        The indicators to store with the trade.
+    now: str
+        The client time of the trade.
+    trade_fee, default 0.0
+        The fee charged for the trade.
+
+    Raises
+    ------
+    Raise KeyError if no such strategy is registered.
+    """
     symbol = symbol.lower()
     db_trade = NewTrade(
         algo_run_id=trading_data.open_order_strategy[symbol].algo_run.run_id,
@@ -234,6 +410,24 @@ async def do_callbacks(
     side: Order.FillSide,
     filled_avg_price: float,
 ):
+    """Clear the stored indicators of symbol and notify strategy of a fill.
+
+    Use the buy indicators and buy_callback for a buy fill, and the sell
+    counterparts otherwise.
+
+    Parameters
+    ----------
+    symbol: str
+        The filled symbol.
+    strategy: Strategy
+        The strategy to notify, or None.
+    filled_qty: float
+        The filled quantity.
+    side: Order.FillSide
+        The side of the fill.
+    filled_avg_price: float
+        The average fill price.
+    """
     symbol = symbol.lower()
     if side == Order.FillSide.buy:
         trading_data.buy_indicators.pop(symbol, None)
@@ -254,6 +448,28 @@ async def update_partially_filled_order(
     updated_at: pd.Timestamp,
     trade_fee: float,
 ) -> None:
+    """Apply a partial fill for symbol to the shared trading state.
+
+    Notify strategy, adjust the recorded position, and save the trade to the
+    database with the stored indicators.
+
+    Parameters
+    ----------
+    symbol: str
+        The filled symbol.
+    strategy: Strategy
+        The strategy that owns the order.
+    filled_qty: float
+        The filled quantity.
+    side: Order.FillSide
+        The side of the fill.
+    filled_avg_price: float
+        The average fill price.
+    updated_at: pd.Timestamp
+        The time of the fill.
+    trade_fee: float
+        The fee charged for the fill.
+    """
     symbol = symbol.lower()
 
     await do_callbacks(
@@ -298,6 +514,32 @@ async def update_filled_order(
     updated_at: pd.Timestamp,
     trade_fee: float,
 ) -> None:
+    """Apply a complete fill for symbol and close its open order.
+
+    Notify strategy, adjust the recorded position, save the trade, and remove
+    the open order from the trading state.
+
+    Parameters
+    ----------
+    symbol: str
+        The filled symbol.
+    strategy: Strategy
+        The strategy that owns the order.
+    filled_qty: float
+        The filled quantity.
+    side: Order.FillSide
+        The side of the fill.
+    filled_avg_price: float
+        The average fill price.
+    updated_at: pd.Timestamp
+        The time of the fill.
+    trade_fee: float
+        The fee charged for the fill.
+
+    Raises
+    ------
+    Raise KeyError if symbol has no open order.
+    """
     symbol = symbol.lower()
 
     await update_partially_filled_order(
@@ -319,6 +561,20 @@ async def update_filled_order(
 
 
 async def handle_trade_update_for_order(trade: Trade) -> bool:
+    """Apply a trade update for a symbol that has an open order.
+
+    Record partial and complete fills. For any other event, such as a
+    cancellation or rejection, discard the open order.
+
+    Parameters
+    ----------
+    trade: Trade
+        The trade update.
+
+    Returns
+    -------
+    Return True.
+    """
     symbol = trade.symbol.lower()
     event = trade.event
 
@@ -356,11 +612,33 @@ async def handle_trade_update_for_order(trade: Trade) -> bool:
 
 
 async def handle_trade_update_wo_order(trade: Trade) -> bool:
+    """Log a trade update that has no matching open order.
+
+    Parameters
+    ----------
+    trade: Trade
+        The trade update.
+
+    Returns
+    -------
+    Return True.
+    """
     tlog(f"trade update without order for {trade}")
     return True
 
 
 async def handle_trade_update(trade: Trade) -> bool:
+    """Dispatch trade according to whether its symbol has an open order.
+
+    Parameters
+    ----------
+    trade: Trade
+        The trade update.
+
+    Returns
+    -------
+    Return True.
+    """
     if trade.symbol.lower() in trading_data.open_orders:
         return await handle_trade_update_for_order(trade)
     else:
@@ -368,6 +646,21 @@ async def handle_trade_update(trade: Trade) -> bool:
 
 
 async def handle_quote(data: Dict) -> bool:
+    """Update the volume order imbalance of a symbol from a quote message.
+
+    Ignore quotes that lack a bid or ask price or carry a skipped condition.
+    Record the latest bid and ask, and keep up to ten recent imbalance values
+    for the symbol.
+
+    Parameters
+    ----------
+    data: Dict
+        The quote message.
+
+    Returns
+    -------
+    Return True.
+    """
     if "askprice" not in data or "bidprice" not in data:
         return True
     if "condition" in data and data["condition"] in QUOTE_SKIP_CONDITIONS:
@@ -426,6 +719,23 @@ async def handle_quote(data: Dict) -> bool:
 async def aggregate_bar_data(
     data_loader: DataLoader, data: Dict, ts: pd.Timestamp, carrier=None
 ) -> None:
+    """Merge a streamed bar into the minute data held by data_loader.
+
+    Let a minute aggregate replace the bar for its minute, and combine other
+    messages with the existing bar. Add the bar volume to the daily volume of
+    the symbol.
+
+    Parameters
+    ----------
+    data_loader: DataLoader
+        The loader that holds the minute data.
+    data: Dict
+        The bar message.
+    ts: pd.Timestamp
+        The bar timestamp; its seconds are ignored.
+    carrier, default None
+        Unused.
+    """
     ts = ts.replace(second=0)
     symbol = data["symbol"].lower()
 
@@ -483,6 +793,23 @@ async def order_inflight(
     now: pd.Timestamp,
     trader: Trader,
 ) -> None:
+    """Reconcile or cancel an open order that has been pending too long.
+
+    Act only on orders outstanding for at least a minute. Record a fill or
+    partial fill reported by the broker, and cancel the order otherwise. Log
+    exceptions instead of raising them.
+
+    Parameters
+    ----------
+    symbol: str
+        The symbol of the order.
+    existing_order: Order
+        The open order.
+    now: pd.Timestamp
+        The current time.
+    trader: Trader
+        The trader used to check and cancel the order.
+    """
     symbol = symbol.lower()
     try:
         if await should_cancel_order(existing_order, now):
@@ -548,6 +875,23 @@ async def order_inflight(
 async def submit_order(
     trader: Trader, symbol: str, what: Dict, external_account_id: str = None
 ) -> Order:
+    """Submit a day order for symbol as described by what.
+
+    Parameters
+    ----------
+    trader: Trader
+        The trader that submits the order.
+    symbol: str
+        The symbol to trade.
+    what: Dict
+        The order details: qty, side, type and, for a limit order, limit_price.
+    external_account_id: str, default None
+        The account to trade on behalf of, or None.
+
+    Returns
+    -------
+    Return the order returned by trader.
+    """
     return (
         await trader.submit_order(
             symbol=symbol,
@@ -573,6 +917,19 @@ async def submit_order(
 async def update_trading_data(
     symbol: str, o: Order, strategy: Strategy, buy: bool
 ) -> None:
+    """Register a newly submitted order and its strategy for symbol.
+
+    Parameters
+    ----------
+    symbol: str
+        The symbol of the order.
+    o: Order
+        The submitted order.
+    strategy: Strategy
+        The strategy that requested the order.
+    buy: bool
+        True for a buy order, which also records the buy time.
+    """
     trading_data.open_orders[symbol] = o
     trading_data.open_order_strategy[symbol] = strategy
     trading_data.last_used_strategy[symbol] = strategy
@@ -590,6 +947,30 @@ async def execute_strategy_result(
     what: Dict,
     external_account_id: str = None,
 ) -> bool:
+    """Submit the order requested by a strategy and record it.
+
+    Register the order in the trading state and save a placeholder trade to the
+    database.
+
+    Parameters
+    ----------
+    strategy: Strategy
+        The strategy that requested the order.
+    trader: Trader
+        The trader that submits the order.
+    data_loader: DataLoader
+        The loader of market data, used for debug logging.
+    symbol: str
+        The symbol to trade.
+    what: Dict
+        The order details.
+    external_account_id: str, default None
+        The account to trade on behalf of, or None.
+
+    Returns
+    -------
+    Return True if an order was submitted and False otherwise.
+    """
     tlog(f"execute_strategy_result for {symbol} do {what}")
     symbol = symbol.lower()
 
@@ -627,6 +1008,36 @@ async def do_strategy(
     portfolio_value: Optional[float],
     carrier=None,
 ) -> bool:
+    """Run strategy on one symbol and execute any requested action.
+
+    Parameters
+    ----------
+    strategy: Strategy
+        The strategy to run.
+    symbol: str
+        The symbol to evaluate.
+    shortable: bool
+        Whether symbol can be sold short.
+    position: float
+        The current position in symbol.
+    data_loader: DataLoader
+        The loader of market data.
+    trader: Trader
+        The trader that submits orders.
+    minute_history: df
+        The minute bars of symbol.
+    now: pd.Timestamp
+        The current time.
+    portfolio_value: Optional[float]
+        The portfolio value, or None.
+    carrier, default None
+        Unused.
+
+    Returns
+    -------
+    Return False if a requested order is not submitted or the strategy rejects
+    symbol, and True otherwise.
+    """
     do, what = await strategy.run(
         symbol=symbol,
         shortable=shortable,
@@ -650,6 +1061,13 @@ async def do_strategy(
 
 
 async def _filter_strategies(symbol: str) -> List:
+    """Return the per-symbol strategies that have not rejected symbol.
+
+    Parameters
+    ----------
+    symbol: str
+        The symbol to filter for.
+    """
     return [
         s
         for s in trading_data.strategies
@@ -667,6 +1085,28 @@ async def do_strategies(
     data: Dict,
     carrier=None,
 ) -> None:
+    """Run each eligible per-symbol strategy on symbol.
+
+    Exclude symbol from later runs of any strategy that rejects it. Log an
+    exception from one strategy without stopping the others.
+
+    Parameters
+    ----------
+    trader: Trader
+        The trader that submits orders.
+    data_loader: DataLoader
+        The loader of market data.
+    symbol: str
+        The symbol to evaluate.
+    position: float
+        The current position in symbol.
+    now: pd.Timestamp
+        The current time.
+    data: Dict
+        Unused.
+    carrier, default None
+        Unused.
+    """
     # run strategies
     strategies = await _filter_strategies(symbol)
     for s in strategies:
@@ -703,6 +1143,29 @@ async def handle_aggregate(
     data: Dict,
     carrier=None,
 ) -> bool:
+    """Process an aggregate bar for symbol and run its strategies.
+
+    Also reconcile or cancel any stale open order for symbol.
+
+    Parameters
+    ----------
+    trader: Trader
+        The trader that manages orders.
+    data_loader: DataLoader
+        The loader that holds the minute data.
+    symbol: str
+        The symbol of the bar.
+    ts: pd.Timestamp
+        The bar timestamp.
+    data: Dict
+        The bar message.
+    carrier, default None
+        Unused.
+
+    Returns
+    -------
+    Return True.
+    """
     symbol = symbol.lower()
 
     await aggregate_bar_data(data_loader, data, ts)
@@ -728,6 +1191,26 @@ async def handle_aggregate(
 async def handle_data_queue_msg(
     data: Dict, trader: Trader, data_loader: DataLoader, carrier=None
 ) -> bool:
+    """Handle a market data message from the data queue.
+
+    Mark the symbol as shortable. Ignore a repeated timestamp for a symbol.
+
+    Parameters
+    ----------
+    data: Dict
+        The market data message.
+    trader: Trader
+        The trader that manages orders.
+    data_loader: DataLoader
+        The loader that holds the minute data.
+    carrier, default None
+        Unused.
+
+    Returns
+    -------
+    Return False for a message, other than a minute aggregate, that arrives
+    more than 15 seconds late. Return True otherwise.
+    """
     global shortable
     global symbol_data_error
     global rejects
@@ -769,6 +1252,23 @@ async def handle_data_queue_msg(
 async def queue_consumer(
     batch_id: str, queue: Queue, data_loader: DataLoader, trader: Trader
 ) -> None:
+    """Consume and dispatch messages from the data queue until cancelled.
+
+    Handle trade updates, new strategy requests and market data. On a
+    ConnectionError, reconnect trader and put the message back on queue. Log
+    other exceptions and continue.
+
+    Parameters
+    ----------
+    batch_id: str
+        The batch identifier for new strategies.
+    queue: Queue
+        The queue to read from.
+    data_loader: DataLoader
+        The loader that holds the minute data.
+    trader: Trader
+        The trader that manages orders.
+    """
     tlog("queue_consumer() starting")
     try:
         while True:
@@ -824,6 +1324,25 @@ async def create_strategies_from_file(
     data_loader: DataLoader,
     strategies_conf: Dict,
 ) -> List[Strategy]:
+    """Create the strategies defined in the configuration file.
+
+    Add the open positions of any configured portfolio to the trading state.
+
+    Parameters
+    ----------
+    batch_id: str
+        The batch identifier of the run.
+    trader: Trader
+        Unused.
+    data_loader: DataLoader
+        The loader passed to each strategy.
+    strategies_conf: Dict
+        A mapping of strategy name to its settings.
+
+    Returns
+    -------
+    Return the strategies that were created.
+    """
     strategy_list = []
     for strategy_name in strategies_conf:
         s = await Strategy.get_strategy(
@@ -849,6 +1368,15 @@ async def create_strategies_from_file(
 
 
 async def load_symbol_position(portfolio_id: str) -> Dict[str, float]:
+    """Return the net open quantity of each symbol held by a portfolio.
+
+    Omit symbols with a net quantity of zero.
+
+    Parameters
+    ----------
+    portfolio_id: str
+        The portfolio whose trades are loaded.
+    """
     trades = await load_trades_by_portfolio(portfolio_id)
 
     if not len(trades):
@@ -873,6 +1401,24 @@ async def create_strategies_from_db(
     trader: Trader,
     data_loader: DataLoader,
 ) -> List[Strategy]:
+    """Create the strategies defined by the active trade plan entries.
+
+    Add the open positions of each created strategy's portfolio to the trading
+    state.
+
+    Parameters
+    ----------
+    batch_id: str
+        The batch identifier of the run.
+    trader: Trader
+        Unused.
+    data_loader: DataLoader
+        The loader passed to each strategy.
+
+    Returns
+    -------
+    Return the strategies that were created.
+    """
     # load from tradeplan file
     trade_plan = await TradePlan.load()
 
@@ -905,6 +1451,19 @@ async def create_strategies_from_db(
 async def handle_new_strategy(
     batch_id: str, portfolio_id: str, parameters: dict, data_loader: DataLoader
 ):
+    """Create a strategy requested at run time and add it to the active set.
+
+    Parameters
+    ----------
+    batch_id: str
+        The batch identifier of the run.
+    portfolio_id: str
+        The portfolio the strategy trades for.
+    parameters: dict
+        The strategy settings, including its name; modified in place.
+    data_loader: DataLoader
+        The loader passed to the strategy.
+    """
     strategy_name = parameters.pop("name")
     parameters["portfolio_id"] = portfolio_id
     strategy = await Strategy.get_strategy(
@@ -924,6 +1483,22 @@ async def consumer_async_main(
     strategies_conf: Dict,
     file_only: bool,
 ):
+    """Set up the consumer and run its tasks until they finish.
+
+    Create the database connection pool and add the created strategies to the
+    trading state. Collect task exceptions instead of raising them.
+
+    Parameters
+    ----------
+    queue: Queue
+        The queue of messages from the producer.
+    unique_id: str
+        The batch identifier of the run.
+    strategies_conf: Dict
+        A mapping of strategy name to its settings.
+    file_only: bool
+        Whether to skip the strategies in the trade plan.
+    """
     await create_db_connection(str(config.dsn))
     data_loader = DataLoader()
 
@@ -970,6 +1545,21 @@ def consumer_main(
     unique_id: str,
     conf: Dict,
 ) -> None:
+    """Run a consumer process until its tasks complete.
+
+    Set the build label, portfolio value and risk in config. Log a keyboard
+    interrupt instead of raising it.
+
+    Parameters
+    ----------
+    queue: Queue
+        The queue of messages from the producer.
+    unique_id: str
+        The batch identifier of the run.
+    conf: Dict
+        The configuration, with a strategies section and optional
+        portfolio_value, risk and file_only settings.
+    """
     tlog(f"*** consumer_main() starting w pid {os.getpid()} ***")
 
     try:

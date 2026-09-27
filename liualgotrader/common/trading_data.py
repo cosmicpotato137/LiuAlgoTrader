@@ -1,4 +1,5 @@
-"""Global data shared during trading"""
+"""Global trading state shared within a process."""
+
 from asyncio import Queue
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple

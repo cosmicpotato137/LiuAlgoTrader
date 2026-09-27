@@ -1,3 +1,13 @@
+"""Framework logging, optionally forwarded to Google Cloud Logging.
+
+Functions
+---------
+tlog
+    Log a message tagged with its origin, process ID and time.
+tlog_exception
+    Log the exception being handled, with its traceback.
+"""
+
 import os
 import sys
 import traceback
@@ -17,6 +27,19 @@ except Exception:
 
 
 def tlog(msg: str, origin: str = None) -> None:
+    """Log a message tagged with its origin, process ID and time.
+
+    Print the message to standard output and, when gcp_logger is enabled, send
+    it to Google Cloud Logging. Report a cloud logging failure on standard
+    output instead of raising.
+
+    Parameters
+    ----------
+    msg: str
+        The message text.
+    origin: str, default None
+        The tag to prefix, or None for the caller's function name.
+    """
     try:
         calling_fn = origin or f"[{sys._getframe(1).f_code.co_name}()]"
     except Exception:
@@ -31,6 +54,16 @@ def tlog(msg: str, origin: str = None) -> None:
 
 
 def tlog_exception(origin: str):
+    """Log the exception being handled, together with its traceback.
+
+    Also print the traceback to standard error. Use only within an exception
+    handler.
+
+    Parameters
+    ----------
+    origin: str
+        The tag to prefix each logged line.
+    """
     traceback.print_exc()
     exc_info = sys.exc_info()
     lines = traceback.format_exception(*exc_info)

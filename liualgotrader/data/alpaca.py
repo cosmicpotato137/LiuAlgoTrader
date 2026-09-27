@@ -1,3 +1,13 @@
+"""Alpaca market data and streaming providers.
+
+Classes
+-------
+AlpacaData
+    Market data provider for the Alpaca REST and crypto APIs.
+AlpacaStream
+    Streaming provider for the Alpaca WebSocket API.
+"""
+
 import asyncio
 import concurrent.futures
 import queue
@@ -28,11 +38,68 @@ nytz = pytz.timezone(NY)
 
 
 def _is_crypto_symbol(symbol: str) -> bool:
+    """Return whether a symbol is a supported crypto pair.
+
+    Only the Bitcoin and Ethereum pairs quoted in US dollars are supported.
+
+    Parameters
+    ----------
+    symbol: str
+        The symbol to check, with or without a slash, in any case.
+    """
     return symbol.lower() in {"eth/usd", "btc/usd", "ethusd", "btcusd"}
 
 
 class AlpacaData(DataAPI):
+    """Market data provider for the Alpaca REST and crypto APIs.
+
+    Supports US equities and the Bitcoin and Ethereum US dollar pairs.
+    Methods that need the REST client raise AssertionError if it is not set.
+
+    Attributes
+    ----------
+    alpaca_rest_client
+        The Alpaca REST client.
+    symbol_chunk_size
+        The number of symbols per snapshot request.
+    datetime_cache: Dict[datetime, datetime]
+        The adjusted slice bounds, keyed by requested datetime.
+
+    Methods
+    -------
+    get_symbols
+        Return the active, tradable US equity symbols.
+    get_market_snapshot
+        Return snapshots of the tradable US equities.
+    get_last_trading
+        Return the time of the most recent trade.
+    get_trading_holidays
+        Return the NYSE holiday dates.
+    get_trading_day
+        Return a datetime shifted by trading days.
+    num_trading_minutes
+        Return the trading minutes in one day.
+    num_trading_days
+        Return the trading days in a date range.
+    get_max_data_points_per_load
+        Return the data point limit per request.
+    trading_days_slice
+        Adjust a datetime slice to trading sessions.
+    crypto_get_symbol_data
+        Return historical bars for a crypto pair.
+    get_symbols_data
+        Return historical bars for several symbols.
+    get_symbol_data
+        Return historical bars for one symbol.
+    """
+
     def __init__(self):
+        """Initialize the Alpaca REST client.
+
+        Raises
+        ------
+        Raise AssertionError if the client cannot be created.
+        """
         self.alpaca_rest_client = REST(
             key_id=config.alpaca_api_key, secret_key=config.alpaca_api_secret
         )
@@ -45,6 +112,7 @@ class AlpacaData(DataAPI):
         self.datetime_cache: Dict[datetime, datetime] = {}
 
     def get_symbols(self) -> List[str]:
+        """Return the symbols of all active, tradable US equities."""
         if not self.alpaca_rest_client:
             raise AssertionError("Must call w/ authenticated Alpaca client")
 
@@ -59,6 +127,17 @@ class AlpacaData(DataAPI):
     async def get_market_snapshot(
         self, filter_func: Optional[Callable] = None
     ) -> List[Dict]:
+        """Return snapshots of all active, tradable US equities.
+
+        Each snapshot is a dictionary with a "ticker" key and the raw data of
+        each snapshot component.
+
+        Parameters
+        ----------
+        filter_func: Optional[Callable], default None
+            A predicate that selects the snapshots to keep, or None to keep
+            all.
+        """
         # parse market snapshots per chunk of symbols
         symbols = self.get_symbols()
         return await self._get_symbols_snapshot(symbols, filter_func)
@@ -66,7 +145,29 @@ class AlpacaData(DataAPI):
     async def _get_symbols_snapshot(
         self, symbols: List[str], filter_func: Optional[Callable]
     ) -> List[Dict]:
+        """Return the market snapshots for the given symbols.
+
+        Drop snapshots that lack a component when filter_func is set, and
+        return them as None otherwise.
+
+        Parameters
+        ----------
+        symbols: List[str]
+            The symbols to fetch.
+        filter_func: Optional[Callable]
+            A predicate that selects the snapshots to keep, or None to keep
+            all.
+        """
         def _parse_ticker_snapshot(_ticker: str, _ticket_snapshot: object):
+            """Return a snapshot as a dictionary, or None if incomplete.
+
+            Parameters
+            ----------
+            _ticker: str
+                The symbol of the snapshot.
+            _ticket_snapshot: object
+                The Alpaca snapshot object.
+            """
             try:
                 return {
                     "ticker": _ticker,
@@ -80,6 +181,16 @@ class AlpacaData(DataAPI):
                 return None
 
         def _parse_snapshot_and_filter(_symbols: List[str]) -> List[Dict]:
+            """Return the parsed snapshots for a chunk of symbols.
+
+            When the enclosing filter_func is set, keep only the snapshots it
+            accepts, excluding missing ones.
+
+            Parameters
+            ----------
+            _symbols: List[str]
+                The symbols to fetch.
+            """
             processed_tickers_snapshot = map(
                 lambda key_and_val: _parse_ticker_snapshot(*key_and_val),
                 self.alpaca_rest_client.get_snapshots(_symbols).items(),
@@ -116,6 +227,16 @@ class AlpacaData(DataAPI):
         return market_snapshots
 
     def _localize_start_end(self, start: date, end: date) -> Tuple[str, str]:
+        """Return a date range as ISO 8601 strings in New York time.
+
+        Parameters
+        ----------
+        start: date
+            The first date, converted to midnight.
+        end: date
+            The last date, converted to midnight, or to the current time if it
+            is today or later.
+        """
         return (
             nytz.localize(
                 datetime.combine(start, datetime.min.time())
@@ -132,6 +253,21 @@ class AlpacaData(DataAPI):
         )
 
     def get_last_trading(self, symbol: str) -> datetime:
+        """Return the time of the most recent trade for a symbol.
+
+        Parameters
+        ----------
+        symbol: str
+            The symbol to look up.
+
+        Returns
+        -------
+        Return the current New York time for crypto pairs.
+
+        Raises
+        ------
+        Raise ValueError if the latest trade is unavailable.
+        """
         if not self.alpaca_rest_client:
             raise AssertionError("Must call w/ authenticated Alpaca client")
 
@@ -149,12 +285,27 @@ class AlpacaData(DataAPI):
         return min_bar.t
 
     def get_trading_holidays(self) -> List[str]:
+        """Return the holiday dates of the NYSE calendar."""
         nyse = pandas_market_calendars.get_calendar("NYSE")
         return nyse.holidays().holidays
 
     def get_trading_day(
         self, symbol: str, now: datetime, offset: int
     ) -> datetime:
+        """Return a reference time shifted by a number of trading days.
+
+        Shift crypto pairs by offset calendar days and other symbols by offset
+        minus one NYSE trading days.
+
+        Parameters
+        ----------
+        symbol: str
+            The symbol whose trading calendar applies.
+        now: datetime
+            The reference datetime, treated as New York time if naive.
+        offset: int
+            The number of days to shift by.
+        """
         if _is_crypto_symbol(symbol):
             cbd_offset = timedelta(days=offset)
         else:
@@ -168,9 +319,36 @@ class AlpacaData(DataAPI):
         )
 
     def num_trading_minutes(self, symbol: str, start: date, end: date) -> int:
+        """Return the number of trading minutes in one day for a symbol.
+
+        Count 24 hours for crypto pairs and 16 hours for other symbols.
+
+        Parameters
+        ----------
+        symbol: str
+            The symbol whose trading hours apply.
+        start: date
+            Unused.
+        end: date
+            Unused.
+        """
         return (24 if _is_crypto_symbol(symbol) else (20 - 4)) * 60
 
     def num_trading_days(self, symbol: str, start: date, end: date) -> int:
+        """Return the number of trading days in a date range for a symbol.
+
+        Count every calendar day for crypto pairs and only NYSE trading days
+        for other symbols.
+
+        Parameters
+        ----------
+        symbol: str
+            The symbol whose trading calendar applies.
+        start: date
+            The first date of the range, as a date or a string.
+        end: date
+            The last date of the range, as a date or a string.
+        """
         if type(start) == str:
             start = date_parser(start)  # type: ignore
         if type(end) == str:
@@ -191,10 +369,28 @@ class AlpacaData(DataAPI):
         )
 
     def get_max_data_points_per_load(self) -> int:
+        """Return 10000, the maximum number of data points per request."""
         # Alpaca suggests 10000 points
         return 10000
 
     def trading_days_slice(self, symbol: str, s: slice) -> slice:
+        """Return a datetime slice adjusted to the trading sessions it spans.
+
+        For other symbols, return a slice between the opening times of its
+        first and last trading days, in New York time, and cache the new bounds
+        in datetime_cache.
+
+        Parameters
+        ----------
+        symbol: str
+            The symbol whose trading calendar applies.
+        s: slice
+            The slice to adjust, with datetime bounds.
+
+        Returns
+        -------
+        Return s unchanged for crypto pairs.
+        """
         if not self.alpaca_rest_client:
             raise AssertionError("Must call w/ authenticated Alpaca client")
 
@@ -234,6 +430,27 @@ class AlpacaData(DataAPI):
         end: str,
         timeframe: TimeFrame,
     ) -> pd.DataFrame:
+        """Return historical bars for a crypto pair.
+
+        Parameters
+        ----------
+        symbol: str
+            The crypto pair, with or without a slash.
+        start: str
+            The start of the range, as an ISO 8601 string.
+        end: str
+            The end of the range, as an ISO 8601 string.
+        timeframe: TimeFrame
+            TimeFrame.Day for daily bars, or any other value for minute bars.
+
+        Returns
+        -------
+        Return a DataFrame indexed by timestamp.
+
+        Raises
+        ------
+        Raise HTTPError if a request fails.
+        """
         if "/" not in symbol:
             symbol = f"{symbol[:3]}/{symbol[3:]}"
         symbol = symbol.upper()
@@ -295,6 +512,30 @@ class AlpacaData(DataAPI):
         end: date = date.today(),
         scale: TimeScale = TimeScale.minute,
     ) -> Dict[str, pd.DataFrame]:
+        """Return historical bars for several symbols.
+
+        Retry on transient HTTP errors.
+
+        Parameters
+        ----------
+        symbols: List[str]
+            The list of symbols to load.
+        start: date
+            The start of the date range.
+        end: date, default date.today()
+            The end of the date range.
+        scale: TimeScale, default TimeScale.minute
+            The bar resolution.
+
+        Returns
+        -------
+        Return a dictionary that maps each symbol found to a DataFrame of the
+        form returned by get_symbol_data.
+
+        Raises
+        ------
+        Raise AssertionError if symbols is not a list.
+        """
         if not self.alpaca_rest_client:
             raise AssertionError("Must call w/ authenticated Alpaca client")
         if not isinstance(symbols, list):
@@ -355,6 +596,31 @@ class AlpacaData(DataAPI):
         end: date = date.today(),
         scale: TimeScale = TimeScale.minute,
     ) -> pd.DataFrame:
+        """Return historical bars for an equity symbol or crypto pair.
+
+        Retry on transient HTTP errors.
+
+        Parameters
+        ----------
+        symbol: str
+            The symbol to load.
+        start: date
+            The start of the date range.
+        end: date, default date.today()
+            The end of the date range.
+        scale: TimeScale, default TimeScale.minute
+            The bar resolution.
+
+        Returns
+        -------
+        Return a DataFrame in New York time with the open, high, low, close,
+        volume, count, average and vwap columns, where average is the
+        volume-weighted price and vwap is NaN.
+
+        Raises
+        ------
+        Raise ValueError if the data cannot be loaded or is empty.
+        """
         _start, _end = self._localize_start_end(start, end)
 
         if not self.alpaca_rest_client:
@@ -427,7 +693,49 @@ class AlpacaData(DataAPI):
 
 
 class AlpacaStream(StreamingAPI):
+    """Streaming provider for the Alpaca WebSocket API.
+
+    Supports US equities and the Bitcoin and Ethereum US dollar pairs.
+
+    Attributes
+    ----------
+    alpaca_ws_client
+        The Alpaca WebSocket client.
+    task: Optional[asyncio.Task]
+        The background streaming task, or None before run.
+
+    Methods
+    -------
+    run
+        Start the WebSocket client in the background.
+    bar_handler
+        Enqueue an equity minute bar event.
+    crypto_bar_handler
+        Enqueue a crypto minute bar event.
+    trades_handler
+        Enqueue an equity trade event.
+    crypto_trades_handler
+        Enqueue a crypto trade event.
+    quotes_handler
+        Discard a quote message.
+    subscribe
+        Subscribe to event types for the given symbols.
+    close
+        Stop the WebSocket client.
+    """
+
     def __init__(self, queues: QueueMapper):
+        """Initialize the WebSocket client and register the shared instance.
+
+        Parameters
+        ----------
+        queues: QueueMapper
+            The mapper from each symbol to its event queue.
+
+        Raises
+        ------
+        Raise AssertionError if the client cannot be created.
+        """
         self.alpaca_ws_client = Stream(
             base_url=URL(config.alpaca_base_url),
             key_id=config.alpaca_api_key,
@@ -444,6 +752,12 @@ class AlpacaStream(StreamingAPI):
         super().__init__(queues)
 
     async def run(self):
+        """Start the WebSocket client in the background, if not yet running.
+
+        Raises
+        ------
+        Raise AssertionError if no queues are set.
+        """
         if not self.task:
             if self.queues:
                 self.task = asyncio.create_task(
@@ -456,6 +770,17 @@ class AlpacaStream(StreamingAPI):
 
     @classmethod
     async def bar_handler(cls, msg):
+        """Convert an equity bar message into an "AM" event and enqueue it.
+
+        In the event, average holds the volume-weighted price and vwap is NaN.
+        Propagate an exception if the queue is full; log and suppress any other
+        error.
+
+        Parameters
+        ----------
+        msg
+            The Alpaca bar message.
+        """
         try:
             event = {
                 "symbol": msg.symbol,
@@ -488,6 +813,16 @@ class AlpacaStream(StreamingAPI):
 
     @classmethod
     async def crypto_bar_handler(cls, msg):
+        """Convert a crypto bar message into an "AM" event and enqueue it.
+
+        Ignore messages from exchanges other than CBSE. Otherwise behave like
+        bar_handler.
+
+        Parameters
+        ----------
+        msg
+            The Alpaca crypto bar message.
+        """
         try:
             if msg.exchange != "CBSE":
                 return
@@ -523,6 +858,17 @@ class AlpacaStream(StreamingAPI):
 
     @classmethod
     async def trades_handler(cls, msg):
+        """Convert an equity trade message into a "T" event and enqueue it.
+
+        Occasionally log a warning for trades more than ten seconds old.
+        Propagate an exception if the queue is full; log and suppress any other
+        error.
+
+        Parameters
+        ----------
+        msg
+            The Alpaca trade message.
+        """
         try:
             ts = pd.to_datetime(msg.timestamp)
             if (time_diff := (datetime.now(tz=nytz) - ts)) > timedelta(
@@ -570,6 +916,16 @@ class AlpacaStream(StreamingAPI):
 
     @classmethod
     async def crypto_trades_handler(cls, msg):
+        """Convert a crypto trade message into a "T" event and enqueue it.
+
+        Ignore messages from exchanges other than CBSE. Otherwise behave like
+        trades_handler.
+
+        Parameters
+        ----------
+        msg
+            The Alpaca crypto trade message.
+        """
         try:
             if msg.exchange != "CBSE":
                 return
@@ -620,11 +976,32 @@ class AlpacaStream(StreamingAPI):
 
     @classmethod
     async def quotes_handler(cls, msg):
+        """Discard a quote message.
+
+        Parameters
+        ----------
+        msg
+            The Alpaca quote message.
+        """
         pass
 
     async def subscribe(
         self, symbols: List[str], events: List[WSEventType]
     ) -> bool:
+        """Subscribe to event types for the given symbols.
+
+        Parameters
+        ----------
+        symbols: List[str]
+            The equity symbols and crypto pairs to subscribe to.
+        events: List[WSEventType]
+            The event types to receive; types other than minute bars, trades
+            and quotes are ignored.
+
+        Returns
+        -------
+        Return True.
+        """
         tlog(f"Starting subscription for {len(symbols)} symbols")
         upper_symbols = [symbol.upper() for symbol in symbols]
         for syms in chunks(upper_symbols, 1000):
@@ -672,6 +1049,7 @@ class AlpacaStream(StreamingAPI):
         return True
 
     async def close(self) -> None:
+        """Stop the WebSocket client and wait for the streaming task to end."""
         tlog("Closing AlpacaStream")
 
         if self.task:

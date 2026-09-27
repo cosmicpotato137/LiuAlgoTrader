@@ -1,9 +1,24 @@
+"""Resample minute price bars to longer intervals.
+
+Classes
+-------
+ResampleRangeType
+    Enumeration of the bar intervals supported by resample.
+
+Functions
+---------
+resample
+    Return price bars resampled to a given interval.
+"""
+
 from enum import Enum
 
 import pandas as pd
 
 
 class ResampleRangeType(Enum):
+    """Enumeration of the bar intervals, in minutes, supported by resample."""
+
     min_1 = 0
     min_2 = 1
     min_5 = 2
@@ -14,6 +29,26 @@ class ResampleRangeType(Enum):
 def resample(
     ohlc: pd.DataFrame, resample_range: ResampleRangeType
 ) -> pd.DataFrame:
+    """Return price bars resampled to a given interval.
+
+    Otherwise, return a new frame with only the open, high, low, close and
+    volume columns.
+
+    Parameters
+    ----------
+    ohlc: pd.DataFrame
+        The price bars, with a datetime index.
+    resample_range: ResampleRangeType
+        The target interval.
+
+    Returns
+    -------
+    Return ohlc unchanged if it is empty or the interval is one minute.
+
+    Raises
+    ------
+    Raise NotImplementedError for an unsupported interval.
+    """
     if ohlc.empty:
         return ohlc
     if resample_range == resample_range.min_1:

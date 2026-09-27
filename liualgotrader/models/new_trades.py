@@ -1,4 +1,11 @@
-"""Save trade details to repository"""
+"""Persistence of the trade operations made by strategy runs.
+
+Classes
+-------
+NewTrade
+    A single trade operation made by a strategy run.
+"""
+
 import json
 from datetime import datetime
 from typing import Dict, List, Tuple
@@ -10,6 +17,41 @@ from liualgotrader.common.tlog import tlog
 
 
 class NewTrade:
+    """Trade operation made by a strategy run.
+
+    Attributes
+    ----------
+    algo_run_id: int
+        The identifier of the run making the trade.
+    symbol: str
+        The traded symbol.
+    operation: str
+        The operation, buy or sell.
+    qty: float
+        The quantity traded.
+    price: float
+        The trade price.
+    indicators: dict
+        The indicators at the time of the trade.
+    trade_id
+        The trade identifier, or None until the trade is saved.
+
+    Methods
+    -------
+    save
+        Save the trade and store its identifier.
+    expire_trade
+        Mark a trade as expired.
+    load_latest
+        Return the latest trade of a symbol for a strategy.
+    get_run_symbols
+        Return the symbols with unexpired trades in a run.
+    rename_algo_run_id
+        Move the trades of a symbol to another run.
+    get_latest_algo_run_id
+        Return the run of the latest trade of a symbol.
+    """
+
     def __init__(
         self,
         algo_run_id: int,
@@ -19,14 +61,22 @@ class NewTrade:
         price: float,
         indicators: dict,
     ):
-        """
-        create a new_trade object
-        :param algo_run_id: id of the algorithm making the transaction
-        :param symbol: stock symbol
-        :param operation: buy or sell
-        :param qty: amount being purchased
-        :param price: buy price
-        :param indicators: buy indicators
+        """Initialize an unsaved trade.
+
+        Parameters
+        ----------
+        algo_run_id: int
+            The identifier of the run making the trade.
+        symbol: str
+            The traded symbol.
+        operation: str
+            The operation, buy or sell.
+        qty: float
+            The quantity traded.
+        price: float
+            The trade price.
+        indicators: dict
+            The indicators at the time of the trade.
         """
         self.algo_run_id = algo_run_id
         self.symbol = symbol
@@ -44,6 +94,24 @@ class NewTrade:
         target_price=None,
         trade_fee=0.0,
     ):
+        """Save this trade as a new record and store its ID in trade_id.
+
+        Store the indicators as an empty object if they contain values that
+        JSON cannot represent, such as NaN.
+
+        Parameters
+        ----------
+        pool: Pool
+            The connection pool.
+        client_buy_time: str
+            The client-side time of the trade.
+        stop_price, default None
+            The stop price, or None.
+        target_price, default None
+            The target price, or None.
+        trade_fee, default 0.0
+            The fee paid for the trade.
+        """
         async with pool.acquire() as con:
             async with con.transaction():
                 try:
@@ -73,6 +141,15 @@ class NewTrade:
 
     @classmethod
     async def expire_trade(cls, pool: Pool, trade_id: int) -> None:
+        """Mark a trade as expired as of the current time.
+
+        Parameters
+        ----------
+        pool: Pool
+            The connection pool.
+        trade_id: int
+            The trade identifier.
+        """
         async with pool.acquire() as con:
             async with con.transaction():
                 await con.execute(
@@ -86,6 +163,29 @@ class NewTrade:
     async def load_latest(
         cls, pool: Pool, symbol: str, strategy_name: str
     ) -> Tuple[int, float, float, float, Dict, datetime]:
+        """Return the latest trade of a symbol made by a strategy.
+
+        Missing prices are returned as 0.0 and missing indicators as an empty
+        dictionary.
+
+        Parameters
+        ----------
+        pool: Pool
+            The connection pool.
+        symbol: str
+            The traded symbol.
+        strategy_name: str
+            The name of the strategy.
+
+        Returns
+        -------
+        Return a tuple of the run identifier, price, stop price, target price,
+        indicators and trade time.
+
+        Raises
+        ------
+        Raise ValueError if the strategy has no trade in the symbol.
+        """
         async with pool.acquire() as con:
             async with con.transaction():
                 row = await con.fetchrow(
@@ -118,6 +218,15 @@ class NewTrade:
     async def get_run_symbols(
         cls, run_id: int, pool: Pool = None
     ) -> List[str]:
+        """Return the symbols that have unexpired trades in a run.
+
+        Parameters
+        ----------
+        run_id: int
+            The run identifier.
+        pool: Pool, default None
+            The connection pool, or None for the shared pool.
+        """
         rc: List = []
         if not pool:
             pool = config.db_conn_pool
@@ -141,6 +250,19 @@ class NewTrade:
     async def rename_algo_run_id(
         cls, new_run_id: int, old_run_id: int, symbol: str, pool: Pool = None
     ) -> None:
+        """Move the trades of a symbol from one run to another.
+
+        Parameters
+        ----------
+        new_run_id: int
+            The identifier of the run receiving the trades.
+        old_run_id: int
+            The identifier of the run that made the trades.
+        symbol: str
+            The traded symbol.
+        pool: Pool, default None
+            The connection pool, or None for the shared pool.
+        """
         if not pool:
             pool = config.db_conn_pool
 
@@ -165,6 +287,19 @@ class NewTrade:
     async def get_latest_algo_run_id(
         cls, symbol: str, pool: Pool = None
     ) -> int:
+        """Return the run identifier of the latest trade of a symbol.
+
+        Parameters
+        ----------
+        symbol: str
+            The traded symbol.
+        pool: Pool, default None
+            The connection pool, or None for the shared pool.
+
+        Returns
+        -------
+        Return None if the symbol has no trades.
+        """
         if not pool:
             pool = config.db_conn_pool
         async with pool.acquire() as con:

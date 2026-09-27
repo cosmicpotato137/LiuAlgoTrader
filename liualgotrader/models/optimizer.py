@@ -1,3 +1,11 @@
+"""Persist and load the batches run by optimizer sessions.
+
+Classes
+-------
+OptimizerRun
+    Database model for the batches run by optimizer sessions.
+"""
+
 from typing import List, Tuple
 
 from liualgotrader.common import config
@@ -5,10 +13,31 @@ from liualgotrader.common.database import create_db_connection
 
 
 class OptimizerRun:
+    """Database model for the batches run by optimizer sessions.
+
+    Methods
+    -------
+    save
+        Record a batch run by an optimizer session.
+    get_portfolio_ids_parameters
+        Return the portfolios of a session.
+    """
+
     @classmethod
     async def save(
         cls, optimizer_session_id: str, batch_id: str, parameters: str
     ):
+        """Record a batch run as part of an optimizer session.
+
+        Parameters
+        ----------
+        optimizer_session_id: str
+            The optimizer session identifier.
+        batch_id: str
+            The batch identifier.
+        parameters: str
+            The parameters used for the batch.
+        """
         async with config.db_conn_pool.acquire() as con:
             async with con.transaction():
                 await con.execute(
@@ -26,6 +55,20 @@ class OptimizerRun:
         cls,
         optimizer_session_id: str,
     ) -> List[Tuple[str, str]]:
+        """Return the portfolios of an optimizer session and their parameters.
+
+        Connect to the database first if no pool exists yet.
+
+        Parameters
+        ----------
+        optimizer_session_id: str
+            The optimizer session identifier.
+
+        Returns
+        -------
+        Return a list of (portfolio_id, parameters) tuples, one for each batch
+        of the session.
+        """
         try:
             _ = config.db_conn_pool
         except AttributeError:

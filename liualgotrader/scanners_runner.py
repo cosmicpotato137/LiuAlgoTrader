@@ -1,6 +1,21 @@
+"""Run scanners periodically and pump new symbols to the producer process.
+
+Functions
+---------
+scanner_runner
+    Run a scanner and publish the symbols it selects.
+create_momentum_scanner
+    Create a Momentum scanner from its settings.
+create_scanners
+    Create the configured scanners.
+scanners_runner
+    Run all configured scanners concurrently.
+async_main
+    Connect to the database and run the scanners.
+main
+    Run the scanner process.
 """
-Run scanners periodically, and pump newly scanned symbols to the Producer process
-"""
+
 import asyncio
 import json
 import multiprocessing as mp
@@ -25,6 +40,18 @@ nyc = timezone("America/New_York")
 
 
 async def scanner_runner(scanner: Scanner, queue: mp.Queue) -> None:
+    """Run scanner and publish the symbols it selects to queue.
+
+    Repeat at the recurrence of the scanner, or run once if it has none. Log
+    exceptions instead of raising them.
+
+    Parameters
+    ----------
+    scanner: Scanner
+        The scanner to run.
+    queue: mp.Queue
+        The queue that receives the results as JSON.
+    """
     try:
         while True:
             symbols = await scanner.run()
@@ -64,6 +91,20 @@ async def scanner_runner(scanner: Scanner, queue: mp.Queue) -> None:
 async def create_momentum_scanner(
     trader: Trader, data_loader: DataLoader, scanner_details: Dict
 ) -> Momentum:
+    """Create a Momentum scanner from its configuration.
+
+    Exit the process if a required setting is missing.
+
+    Parameters
+    ----------
+    trader: Trader
+        The trader passed to the scanner.
+    data_loader: DataLoader
+        The loader passed to the scanner.
+    scanner_details: Dict
+        The scanner settings: the filter values and optional recurrence,
+        target_strategy_name and max_symbols.
+    """
     try:
         recurrence = scanner_details.get("recurrence", None)
         target_strategy_name = scanner_details.get(
@@ -94,6 +135,25 @@ async def create_momentum_scanner(
 async def create_scanners(
     trader: Trader, data_loader: DataLoader, scanners_conf: Dict
 ) -> List[Scanner]:
+    """Create the scanners listed in scanners_conf.
+
+    Build the momentum entry as the built-in Momentum scanner and load every
+    other entry as a custom scanner class.
+
+    Parameters
+    ----------
+    trader: Trader
+        The trader passed to the momentum scanner.
+    data_loader: DataLoader
+        The loader for custom scanners, and the connector for the momentum
+        scanner's loader.
+    scanners_conf: Dict
+        A mapping of scanner name to its settings.
+
+    Returns
+    -------
+    Return the scanners in configuration order.
+    """
     scanners: List[Scanner] = []
 
     for scanner_name in scanners_conf:
@@ -120,6 +180,20 @@ async def create_scanners(
 async def scanners_runner(
     scanners_conf: Dict, queue: mp.Queue, trader: Trader
 ) -> None:
+    """Run all configured scanners concurrently until they finish.
+
+    Collect scanner exceptions instead of raising them, and cancel the scanners
+    if cancelled. Close queue before returning.
+
+    Parameters
+    ----------
+    scanners_conf: Dict
+        A mapping of scanner name to its settings.
+    queue: mp.Queue
+        The queue that receives the scanner results.
+    trader: Trader
+        The trader passed to the scanners.
+    """
     print("** scanners_runner() task starting **")
     scanners: List[Scanner] = await create_scanners(
         trader, DataLoader(), scanners_conf
@@ -158,6 +232,17 @@ async def scanners_runner(
 
 
 async def async_main(scanners_conf: Dict, queue: mp.Queue) -> None:
+    """Connect to the database and run the configured scanners.
+
+    Collect exceptions instead of raising them.
+
+    Parameters
+    ----------
+    scanners_conf: Dict
+        A mapping of scanner name to its settings.
+    queue: mp.Queue
+        The queue that receives the scanner results.
+    """
     await create_db_connection(str(config.dsn))
 
     main_task = asyncio.create_task(
@@ -179,6 +264,22 @@ def main(
     conf_dict: Dict,
     scanner_queue: mp.Queue,
 ) -> None:
+    """Run the scanner process until all scanners complete.
+
+    Do nothing if the scanners section is empty. Log exceptions and keyboard
+    interrupts instead of raising them.
+
+    Parameters
+    ----------
+    conf_dict: Dict
+        The configuration, with a scanners section.
+    scanner_queue: mp.Queue
+        The queue that receives the scanner results.
+
+    Raises
+    ------
+    Raise KeyError if conf_dict has no scanners section.
+    """
     tlog(f"*** scanners_runner.main() starting w pid {os.getpid()} ***")
 
     if scanners_conf := conf_dict["scanners"]:

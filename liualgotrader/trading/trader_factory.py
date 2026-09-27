@@ -1,3 +1,13 @@
+"""Create and look up the shared broker trader.
+
+Functions
+---------
+trader_factory
+    Return the shared trader for the configured broker.
+get_trader_by_name
+    Return the trader stored by trader_factory under a name.
+"""
+
 from typing import Dict
 
 from liualgotrader.common import config
@@ -11,6 +21,22 @@ traders: Dict[str, Trader] = {}
 
 
 def trader_factory(*args, **kwargs) -> Trader:
+    """Return the shared trader for the configured broker.
+
+    Create the trader on first use and store it in traders under ALPACA, GEMINI
+    or TRADIER; return an existing trader as is, ignoring the arguments.
+
+    Parameters
+    ----------
+    *args
+        Positional arguments passed to the trader constructor.
+    **kwargs
+        Keyword arguments passed to the trader constructor.
+
+    Raises
+    ------
+    Raise Exception if config.broker is not supported.
+    """
     global traders
 
     if config.broker == BrokerType.alpaca:
@@ -30,6 +56,17 @@ def trader_factory(*args, **kwargs) -> Trader:
 
 
 def get_trader_by_name(trader_name: str) -> Trader:
+    """Return the trader stored by trader_factory under a name.
+
+    Parameters
+    ----------
+    trader_name: str
+        The key of the trader, such as ALPACA.
+
+    Raises
+    ------
+    Raise ValueError if no trader exists under that name.
+    """
     global traders
 
     if trader_name not in traders:

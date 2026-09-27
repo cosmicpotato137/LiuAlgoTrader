@@ -1,3 +1,11 @@
+"""Deprecated persistence of round-trip trades.
+
+Classes
+-------
+Trade
+    Deprecated record of a round-trip trade.
+"""
+
 import json
 from typing import Dict
 
@@ -7,6 +15,39 @@ from deprecated import deprecated
 
 @deprecated(reason="should not be used")
 class Trade:
+    """Deprecated record of a round-trip trade.
+
+    The class is deprecated and should not be used.
+
+    Attributes
+    ----------
+    algo_run_id: int
+        The identifier of the run making the trade.
+    symbol: str
+        The traded symbol.
+    qty: int
+        The quantity bought.
+    buy_price: float
+        The buy price.
+    buy_indicators: dict
+        The indicators at the time of the buy.
+    trade_id
+        The trade identifier, or None until the buy is saved.
+    sell_price: float
+        The sell price, set by save_sell.
+    sell_indicators: Dict
+        The indicators at the time of the sell.
+    is_win: bool
+        Whether the sell price exceeds the buy price.
+
+    Methods
+    -------
+    save_buy
+        Save the buy side of the trade.
+    save_sell
+        Save the sell side of the trade.
+    """
+
     sell_price: float
     sell_indicators: Dict
     is_win: bool
@@ -19,14 +60,20 @@ class Trade:
         price: float,
         indicators: dict,
     ):
-        """
-        create a trade object, which mean a "buy" operation, and creating a transaction_id,
-        which may be used later to update the "sell"
-        :param algo_run_id: id of the algorithm making the transaction
-        :param symbol: stock symbol
-        :param qty: amount being purchased
-        :param price: buy price
-        :param indicators: buy indicators
+        """Initialize the buy side of a trade.
+
+        Parameters
+        ----------
+        algo_run_id: int
+            The identifier of the run making the trade.
+        symbol: str
+            The traded symbol.
+        qty: int
+            The quantity bought.
+        price: float
+            The buy price.
+        indicators: dict
+            The indicators at the time of the buy.
         """
         self.algo_run_id = algo_run_id
         self.symbol = symbol
@@ -36,6 +83,15 @@ class Trade:
         self.trade_id = None
 
     async def save_buy(self, pool: Pool, client_buy_time: str):
+        """Save the buy side of this trade and store its ID in trade_id.
+
+        Parameters
+        ----------
+        pool: Pool
+            The connection pool.
+        client_buy_time: str
+            The client-side time of the buy.
+        """
         async with pool.acquire() as con:
             async with con.transaction():
                 self.trade_id = await con.fetchval(
@@ -55,6 +111,22 @@ class Trade:
     async def save_sell(
         self, pool: Pool, price: float, indicators: dict, client_sell_time: str
     ):
+        """Save the sell side of this trade.
+
+        Set sell_price, sell_indicators and is_win, and save them with the
+        current time as the sell time.
+
+        Parameters
+        ----------
+        pool: Pool
+            The connection pool.
+        price: float
+            The sell price.
+        indicators: dict
+            The indicators at the time of the sell.
+        client_sell_time: str
+            The client-side time of the sell.
+        """
         self.sell_price = price
         self.sell_indicators = indicators
         self.is_win = self.sell_price > self.buy_price

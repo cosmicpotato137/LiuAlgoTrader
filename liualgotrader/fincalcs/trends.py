@@ -1,3 +1,20 @@
+"""Classify price trends and measure volatility.
+
+Classes
+-------
+SeriesTrendType
+    Enumeration of the trend categories of a series.
+VolatilityClassificationType
+    Enumeration of qualitative volatility levels.
+
+Functions
+---------
+get_series_trend
+    Classify the trend of a series by its regression slope.
+volatility
+    Return the recent volatility of a symbol's closing prices.
+"""
+
 import math
 from datetime import datetime, timedelta
 from enum import Enum
@@ -14,6 +31,8 @@ est = pytz.timezone("US/Eastern")
 
 
 class SeriesTrendType(Enum):
+    """Enumeration of the trend categories of a series."""
+
     UNKNOWN = 0
     SHARP_DOWN = 1
     DOWN = 5
@@ -22,6 +41,8 @@ class SeriesTrendType(Enum):
 
 
 class VolatilityClassificationType(Enum):
+    """Enumeration of qualitative volatility levels."""
+
     UNKNOWN = 0
     LOW = 1
     MEDIUM = 5
@@ -29,6 +50,23 @@ class VolatilityClassificationType(Enum):
 
 
 def get_series_trend(series: pd.Series) -> Tuple[float, SeriesTrendType]:
+    """Classify the trend of a series by the slope of its regression line.
+
+    Parameters
+    ----------
+    series: pd.Series
+        The values to classify, in order.
+
+    Returns
+    -------
+    Return the slope, rounded to three decimals, and the trend: UP in (0, 1],
+    SHARP_UP above 1, DOWN in [-1, 0) and SHARP_DOWN otherwise. Return UNKNOWN
+    with slope 0 for under four values, or math.inf on a floating-point error.
+
+    Raises
+    ------
+    Set NumPy to raise on every floating-point error.
+    """
     if len(series) < 4:
         return 0, SeriesTrendType.UNKNOWN
 
@@ -52,6 +90,22 @@ def get_series_trend(series: pd.Series) -> Tuple[float, SeriesTrendType]:
 
 
 def volatility(data_loader: DataLoader, symbol: str, now: datetime) -> float:
+    """Return the recent volatility of a symbol's closing prices.
+
+    Parameters
+    ----------
+    data_loader: DataLoader
+        The loader to read prices from, which may fetch data.
+    symbol: str
+        The symbol to measure.
+    now: datetime
+        The end of the thirty-day look-back period.
+
+    Returns
+    -------
+    Return the latest 20-bar rolling standard deviation of the percentage
+    changes of the close.
+    """
     return (
         data_loader[symbol]
         .close[now - timedelta(days=30) : now]  # type: ignore

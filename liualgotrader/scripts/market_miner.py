@@ -1,4 +1,18 @@
-"""off-hours calculations, and data collections"""
+"""Off-hours calculations and data collection.
+
+Usage: market_miner
+Run it in the directory that holds the miner configuration, miner.toml.
+
+Functions
+---------
+motd
+    Log the welcome banner.
+main
+    Load and validate the miners named in the configuration.
+main_cli
+    Run the market miner from the command line.
+"""
+
 import asyncio
 import importlib.util
 import os
@@ -18,8 +32,15 @@ from liualgotrader.miners.base import Miner
 
 
 def motd(filename: str, version: str) -> None:
-    """Display welcome message"""
+    """Log the welcome banner and the database DSN.
 
+    Parameters
+    ----------
+    filename: str
+        The script file name.
+    version: str
+        The build label.
+    """
     print("+=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=+")
     tlog(f"{filename} {version} starting")
     print("+=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=+")
@@ -28,6 +49,16 @@ def motd(filename: str, version: str) -> None:
 
 
 async def main(conf_dict: Dict):
+    """Load and validate the miner classes named in the configuration.
+
+    Exit the process if a miner class does not inherit from Miner, and log any
+    other loading error. The miners are not run.
+
+    Parameters
+    ----------
+    conf_dict: Dict
+        The miner configuration, with a "miners" section keyed by miner name.
+    """
     task_list: List[Optional[asyncio.Task]] = []
 
     await create_db_connection()
@@ -58,8 +89,10 @@ async def main(conf_dict: Dict):
 
 
 def main_cli() -> None:
-    """
-    starting
+    """Run the market miner from the command line.
+
+    Load the miner configuration from the current directory and run main. Exit
+    if the configuration file is not found.
     """
     try:
         build_label = pygit2.Repository("../").describe(

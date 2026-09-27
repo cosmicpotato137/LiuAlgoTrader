@@ -1,3 +1,30 @@
+"""Command-line setup and administration of the Liu framework.
+
+Usage: liu quickstart
+       liu create portfolio <amount> [--credit=<credit>]
+The quickstart command runs the setup wizard. The create portfolio command
+creates a portfolio of a positive amount and optional positive credit line.
+
+Functions
+---------
+show_version
+    Print the name of the framework with its build label.
+show_usage
+    Print the version banner and the command-line usage of liu.
+setup_db
+    Download the database files and start a PostgreSQL container.
+setup_samples
+    Download the samples and write an environment script.
+quickstart
+    Guide the user interactively through the initial setup.
+create_account
+    Create an account and print its identifier.
+create_portfolio
+    Create a portfolio and print its identifier.
+main_cli
+    Run the liu command-line interface and exit.
+"""
+
 import asyncio
 import getopt
 import os
@@ -16,10 +43,12 @@ from liualgotrader.models.portfolio import Portfolio
 
 
 def show_version():
+    """Print the name of the framework together with its build label."""
     print(f"Liu Algo Trading Framework v{config.build_label}")
 
 
 def show_usage():
+    """Print the version banner and the command-line usage of liu."""
     show_version()
 
     print()
@@ -40,6 +69,24 @@ def setup_db(
     password: str,
     restore_sample_db: bool,
 ):
+    """Download the database files and start a PostgreSQL container.
+
+    Start the database with docker-compose. Exit the process if a download
+    fails.
+
+    Parameters
+    ----------
+    db_location: str
+        The directory for the database files, created if missing.
+    db_name: str
+        The database name.
+    user_name: str
+        The database user name.
+    password: str
+        The database password.
+    restore_sample_db: bool
+        Whether to download and restore the sample database.
+    """
     try:
         print()
         print("+---------------------+")
@@ -111,6 +158,22 @@ def setup_db(
 def setup_samples(
     samples_location: str, user: str, passwd: str, db: str
 ) -> None:
+    """Download the quickstart samples and write an environment script.
+
+    The script sets DSN for the local database. Exit the process if any step
+    fails.
+
+    Parameters
+    ----------
+    samples_location: str
+        The directory for the samples, created if missing.
+    user: str
+        The database user name.
+    passwd: str
+        The database password.
+    db: str
+        The database name.
+    """
     try:
         print()
         print("+--------------------+")
@@ -160,6 +223,11 @@ def setup_samples(
 
 
 def quickstart():
+    """Guide the user interactively through the initial framework setup.
+
+    Set up the database and download the samples as the user selects. Exit the
+    process if the Alpaca API key and secret are not configured.
+    """
     print(f"Welcome to Lig Algo Trading Framework v{config.build_label}!")
     print()
     print("This wizard will guide you through the setup process.")
@@ -354,6 +422,15 @@ def quickstart():
 
 
 def create_account(amount: float, credit: float):
+    """Create an account and print its identifier.
+
+    Parameters
+    ----------
+    amount: float
+        The opening balance.
+    credit: float
+        The credit line; a positive value allows a negative balance.
+    """
     loop = asyncio.get_event_loop()
     loop.run_until_complete(create_db_connection())
     account_id = loop.run_until_complete(
@@ -363,6 +440,15 @@ def create_account(amount: float, credit: float):
 
 
 def create_portfolio(amount: float, credit: float):
+    """Create a portfolio and print its identifier.
+
+    Parameters
+    ----------
+    amount: float
+        The portfolio size.
+    credit: float
+        The credit line.
+    """
     portfolio_id = str(uuid.uuid4())
     loop = asyncio.get_event_loop()
     loop.run_until_complete(create_db_connection())
@@ -378,6 +464,12 @@ def create_portfolio(amount: float, credit: float):
 
 
 def main_cli() -> None:
+    """Run the liu command-line interface and exit.
+
+    Support the quickstart command, which runs the setup wizard, and the create
+    portfolio command, which takes a positive amount and an optional positive
+    credit line. Print the usage text for a missing or unknown command.
+    """
     config.filename = os.path.basename(__file__)
 
     try:

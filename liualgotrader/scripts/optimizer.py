@@ -1,3 +1,32 @@
+"""Optimize strategy hyperparameters by backtesting their combinations.
+
+Usage: optimizer [--concurrency=<processes>]
+Backtest each hyperparameter combination in the optimizer section of the
+trade plan, tradeplan.toml in TRADEPLAN_DIR or the current directory, with
+at most 4 concurrent backtests by default.
+
+Functions
+---------
+motd
+    Log the welcome banner.
+show_usage
+    Print the command-line usage of the optimizer.
+create_parameters
+    Return the parameters defined in a configuration.
+create_hyperparameters
+    Return the hyperparameters defined in a configuration.
+dateFromString
+    Return the date described by a natural-language string.
+realize
+    Return a copy of a configuration with parameter values applied.
+optimize
+    Run a backtest for each hyperparameter combination in parallel.
+load_configuration
+    Return the configuration loaded from a TOML file.
+main_cli
+    Run the hyperparameter optimizer from the command line and exit.
+"""
+
 import copy
 import getopt
 import multiprocessing as mp
@@ -17,8 +46,15 @@ from liualgotrader.common.tlog import tlog
 
 
 def motd(filename: str, version: str) -> None:
-    """Display welcome message"""
+    """Log the welcome banner.
 
+    Parameters
+    ----------
+    filename: str
+        The script file name.
+    version: str
+        The build label.
+    """
     tlog("++++++++++++++++++++++++++++++++++++++++++++++++++++++++++")
     tlog("++++++++++++++++++++++++++++++++++++++++++++++++++++++++++")
     tlog(f"{filename} {version} starting")
@@ -27,12 +63,23 @@ def motd(filename: str, version: str) -> None:
 
 
 def show_usage():
+    """Print the command-line usage of the optimizer."""
     print(
         f"usage:\n{sys.argv[0]}  [--concurrency=<int> DEFAULT 4]",
     )
 
 
 def create_parameters(parameters: Dict) -> List[Parameter]:
+    """Return the parameters defined in a parameter configuration.
+
+    Name each parameter by its dotted path, strategies.<strategy>.<name>.
+
+    Parameters
+    ----------
+    parameters: Dict
+        The configuration, with a "strategies" section that maps each strategy
+        to its parameter settings.
+    """
     params = []
 
     for strategy in parameters["strategies"]:
@@ -49,12 +96,30 @@ def create_parameters(parameters: Dict) -> List[Parameter]:
 
 
 def create_hyperparameters(parameters: Dict) -> Hyperparameters:
+    """Return the hyperparameters defined in a parameter configuration.
+
+    Parameters
+    ----------
+    parameters: Dict
+        The configuration, in the form accepted by create_parameters.
+    """
     params = create_parameters(parameters)
     tlog(f"created {len(params)} hyper-parameters")
     return Hyperparameters(params)
 
 
 def dateFromString(s: str) -> date:
+    """Return the date described by a natural-language string.
+
+    Parameters
+    ----------
+    s: str
+        The date string, either explicit or relative, such as "yesterday".
+
+    Raises
+    ------
+    Raise ValueError if the string cannot be parsed as a date or a time.
+    """
     c = pdt.Calendar()
     result, what = c.parse(s)
 
@@ -79,6 +144,15 @@ def dateFromString(s: str) -> date:
 
 
 def realize(config: Dict, parameters: tuple) -> Dict:
+    """Return a copy of a configuration with parameter values applied.
+
+    Parameters
+    ----------
+    config: Dict
+        The configuration; not modified.
+    parameters: tuple
+        Pairs of a dotted configuration path and its value.
+    """
     d = copy.deepcopy(config)
 
     for parameter in parameters:
@@ -100,6 +174,26 @@ def optimize(
     conf_dict: Dict,
     concurrency: int,
 ):
+    """Run a backtest for each hyperparameter combination in parallel.
+
+    Run each backtest in its own process. A portfolio parameter creates a new
+    portfolio in the database for each backtest.
+
+    Parameters
+    ----------
+    start_date: date
+        The first day to backtest.
+    end_date: date
+        The last day to backtest.
+    hyperparameters: Hyperparameters
+        The hyperparameter combinations to test.
+    parameters: List[Parameter]
+        The parameters, such as portfolios, created anew for each backtest.
+    conf_dict: Dict
+        The trade plan to apply the values to.
+    concurrency: int
+        The maximum number of backtests to run at the same time.
+    """
     optimizer_session_id = str(uuid.uuid4())
     tlog("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-")
     tlog(f"optimizer session_id {optimizer_session_id} starting")
@@ -130,6 +224,15 @@ def optimize(
 
 
 def load_configuration(filename: str):
+    """Return the configuration loaded from a TOML file.
+
+    Exit the process if the file is not found.
+
+    Parameters
+    ----------
+    filename: str
+        The path of the file.
+    """
     try:
         import toml
 
@@ -143,6 +246,13 @@ def load_configuration(filename: str):
 
 
 def main_cli() -> None:
+    """Run the hyperparameter optimizer from the command line and exit.
+
+    Run optimize with the optimizer section of the trade plan, taking an
+    optional --concurrency option (default 4) for the number of parallel
+    backtests. Exit early on invalid arguments, a missing optimizer section or
+    unparsable dates.
+    """
     mp.set_start_method("spawn")
 
     if len(sys.argv) > 2:

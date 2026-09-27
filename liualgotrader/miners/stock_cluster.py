@@ -1,3 +1,11 @@
+"""Miner for the details of active stocks listed by Polygon.
+
+Classes
+-------
+StockCluster
+    Miner that stores the details of active Polygon stocks.
+"""
+
 import asyncio
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -16,21 +24,56 @@ from liualgotrader.models.ticker_data import TickerData
 
 
 class StockCluster(Miner):
+    """Miner that stores the details of active stocks listed by Polygon.
+
+    Attributes
+    ----------
+    num_workers
+        The number of worker threads for concurrent requests.
+
+    Methods
+    -------
+    run
+        Download active stock details and save them to the database.
+    """
+
     def __init__(self):
+        """Initialize the miner with twenty worker threads."""
         self._num_workers = 20
         super().__init__(name="StockCluster")
 
     @property
     def num_workers(self):
+        """Return the number of worker threads used for concurrent requests."""
         return self._num_workers
 
     @num_workers.setter
     def num_workers(self, new_num_workers: int):
+        """Validate a requested number of worker threads.
+
+        Parameters
+        ----------
+        new_num_workers: int
+            The requested number of threads.
+
+        Raises
+        ------
+        Raise ValueError unless new_num_workers is between 1 and 100.
+        """
         if new_num_workers <= 0 or new_num_workers > 100:
             raise ValueError("number of workers must be positive and less than 100")
 
     @timeit
     async def run(self) -> bool:
+        """Download the details of active stocks from Polygon and store them.
+
+        Save the details of each active company to the ticker data table,
+        logging progress and the run time.
+
+        Returns
+        -------
+        Return True when done.
+        """
         tickers = []
 
         with ThreadPoolExecutor(max_workers=self.num_workers) as executor:
@@ -68,6 +111,17 @@ class StockCluster(Miner):
         return True
 
     def _get_count(self, session) -> int:
+        """Return the number of active stock tickers reported by Polygon.
+
+        Parameters
+        ----------
+        session
+            The HTTP session for the request.
+
+        Raises
+        ------
+        Raise requests.HTTPError if the request fails.
+        """
         url = "https://api.polygon.io/" + "v2" + "/reference/tickers"
         with session.get(
             url,
@@ -83,6 +137,17 @@ class StockCluster(Miner):
             return response.json()["count"]
 
     def _fetch(self, session: requests.Session, page: int) -> List[Ticker]:
+        """Return the active stock tickers on one listing page.
+
+        Block and retry indefinitely on connection errors.
+
+        Parameters
+        ----------
+        session: requests.Session
+            The HTTP session for the request.
+        page: int
+            The page number, with fifty tickers per page.
+        """
         url = "https://api.polygon.io/" + "v2" + "/reference/tickers"
         try:
             with session.get(
@@ -105,6 +170,15 @@ class StockCluster(Miner):
             return self._fetch(requests.Session(), page)
 
     async def _update_ticker_details(self, ticker_info: Dict) -> None:
+        """Save the details of one company to the ticker data table.
+
+        Do nothing for an inactive company. Retry indefinitely if saving fails.
+
+        Parameters
+        ----------
+        ticker_info: Dict
+            The company details returned by Polygon.
+        """
         if ticker_info["active"] is False:
             return
 
@@ -127,6 +201,26 @@ class StockCluster(Miner):
     def _fetch_symbol_details(
         self, session: requests.Session, ticker: Ticker
     ) -> Optional[Dict]:
+        """Return the company details of a ticker if the company is active.
+
+        Block and retry indefinitely on connection errors.
+
+        Parameters
+        ----------
+        session: requests.Session
+            The HTTP session for the request.
+        ticker: Ticker
+            The ticker to look up.
+
+        Returns
+        -------
+        Return None for a failed request or an inactive company.
+
+        Raises
+        ------
+        Raise Exception with the response text if the payload is not valid
+        JSON.
+        """
         url = (
             "https://api.polygon.io/" + "v1" + f"/meta/symbols/{ticker.ticker}/company"
         )

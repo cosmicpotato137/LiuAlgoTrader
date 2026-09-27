@@ -1,3 +1,24 @@
+"""Backtest the trade plan over a range of past days.
+
+Usage: backtester from <start_date> [--asset=equity|crypto]
+    [--scanners=<name,...>] [--strats=<name,...>] [--to=<end_date>]
+    [--scale=day|minute] [--buy-fee-percentage=<fraction>]
+    [--sell-fee-percentage=<fraction>]
+Run it in the directory that holds the trade plan, tradeplan.toml. The
+defaults are equity, all scanners and strategies, today, day and no fees.
+
+Functions
+---------
+show_usage
+    Print the command-line usage and options of the backtester.
+show_version
+    Print the script file name and version.
+dateFromString
+    Return the date described by a natural-language string.
+main_cli
+    Run a backtest from the command line.
+"""
+
 import getopt
 import os
 import sys
@@ -27,6 +48,7 @@ from liualgotrader.strategies.base import Strategy, StrategyType
 
 
 def show_usage():
+    """Print the command-line usage and options of the backtester."""
     print(
         f"\n{sys.argv[0]} from <start_date> [--asset=equity(DEFAULT)|crypto][--scanners=<scanner-name,>] [--strats=<strategy-name,>] [--to=<end_date> DEFAULT is today] [--scale=day(DEFAULT)|minute [--buy-fee-percentage=0.(DEFAULT)] [--sell-fee-percentage=0.(DEFAULT)]",
     )
@@ -48,11 +70,30 @@ def show_usage():
 
 
 def show_version(filename: str, version: str) -> None:
-    """Display welcome message"""
+    """Print the script file name and version.
+
+    Parameters
+    ----------
+    filename: str
+        The script file name.
+    version: str
+        The Git version label.
+    """
     print(f"filename:{filename}\ngit version:{version}\n")
 
 
 def dateFromString(s: str) -> date:
+    """Return the date described by a natural-language string.
+
+    Parameters
+    ----------
+    s: str
+        The date string, either explicit or relative, such as "yesterday".
+
+    Raises
+    ------
+    Raise ValueError if the string cannot be parsed as a date or a time.
+    """
     c = pdt.Calendar()
     result, what = c.parse(s)
     dt = None
@@ -76,6 +117,13 @@ def dateFromString(s: str) -> date:
 
 
 def main_cli() -> None:
+    """Run a backtest from the command line.
+
+    Parse the from command and its options from sys.argv, apply the
+    portfolio_value and risk settings of the configuration, run the backtest
+    and exit. Print the usage text and exit on missing or invalid arguments,
+    and exit if the trade plan is not found.
+    """
     try:
         config.build_label = pygit2.Repository("../").describe(
             describe_strategy=pygit2.GIT_DESCRIBE_TAGS

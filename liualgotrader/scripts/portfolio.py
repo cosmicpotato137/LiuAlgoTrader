@@ -1,3 +1,28 @@
+"""Command-line management of portfolios.
+
+Usage: portfolio create <account_size> <credit_line> <asset_type>
+       portfolio equity|account|recalc|trades <portfolio_id>
+       portfolio list
+The asset type is US_EQUITIES or CRYPTO.
+
+Functions
+---------
+equity
+    Show the current equity breakdown of a portfolio.
+account
+    Show the account transactions of a portfolio.
+recalc
+    Recalculate the account transactions of a portfolio.
+create
+    Create a new portfolio and print its identifier.
+trades
+    Show the trades of a portfolio.
+list
+    List the active portfolios.
+main_cli
+    Run the portfolio command-line interface.
+"""
+
 import asyncio
 import uuid
 
@@ -12,7 +37,13 @@ from liualgotrader.reprocess.portfolio import account_transactions
 
 
 def equity(portfolio_id: str):
-    """Show current equity breakdown"""
+    """Show the current equity breakdown of a portfolio.
+
+    Parameters
+    ----------
+    portfolio_id: str
+        The portfolio identifier.
+    """
     portfolio = asyncio.run(analysis.get_portfolio_equity(portfolio_id))
     if portfolio.empty:
         print("Empty portfolio")
@@ -32,7 +63,13 @@ def equity(portfolio_id: str):
 
 
 def account(portfolio_id: str):
-    """Show account transactions for portfolio"""
+    """Show the account transactions of a portfolio.
+
+    Parameters
+    ----------
+    portfolio_id: str
+        The portfolio identifier.
+    """
     portfolio = asyncio.run(analysis.get_portfolio_cash(portfolio_id))
     if portfolio.empty:
         print("Empty portfolio transactions")
@@ -51,12 +88,31 @@ def account(portfolio_id: str):
 
 
 def recalc(portfolio_id):
-    """Re-calculate portfolio's account transactions"""
+    """Recalculate the account transactions of a portfolio.
+
+    Reset the account balance and rebuild the transactions from the portfolio's
+    trades.
+
+    Parameters
+    ----------
+    portfolio_id
+        The portfolio identifier.
+    """
     account_transactions(portfolio_id)
 
 
 def create(account_size: float, credit_line: float, asset_type: str):
-    """Create a new account"""
+    """Create a new portfolio and print its identifier.
+
+    Parameters
+    ----------
+    account_size: float
+        The portfolio size.
+    credit_line: float
+        The credit line.
+    asset_type: str
+        The asset type, US_EQUITIES or CRYPTO.
+    """
     portfolio_id = str(uuid.uuid4())
     try:
         asset = AssetType[asset_type]
@@ -77,7 +133,13 @@ def create(account_size: float, credit_line: float, asset_type: str):
 
 
 def trades(portfolio_id):
-    """Display portfolio trades"""
+    """Show the trades of a portfolio.
+
+    Parameters
+    ----------
+    portfolio_id
+        The portfolio identifier.
+    """
     portfolio = analysis.load_trades_by_portfolio(portfolio_id)
     portfolio = (
         portfolio[["tstamp", "symbol", "operation", "qty", "price"]]
@@ -99,8 +161,7 @@ def trades(portfolio_id):
 
 
 def list():
-    """List active portfolios"""
-
+    """List the active portfolios."""
     data = []
     loop = asyncio.get_event_loop()
     loop.run_until_complete(create_db_connection())
@@ -137,6 +198,10 @@ def list():
 
 
 def main_cli() -> None:
+    """Run the portfolio command-line interface.
+
+    Expose the create, equity, recalc, account, trades and list commands.
+    """
     fire.Fire(
         {
             "create": create,

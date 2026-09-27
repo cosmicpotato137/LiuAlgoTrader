@@ -1,3 +1,11 @@
+"""Gemini cryptocurrency exchange trader.
+
+Classes
+-------
+GeminiTrader
+    Trader implementation for the Gemini cryptocurrency exchange.
+"""
+
 import base64
 import hashlib
 import hmac
@@ -25,6 +33,73 @@ utctz = timezone("UTC")
 
 
 class GeminiTrader(Trader):
+    """Trader implementation for the Gemini cryptocurrency exchange.
+
+    The market is treated as open all day, every day; all symbols are
+    fractionable, none is shortable, and market orders are rejected. The
+    credentials come from the GEMINI_API_KEY and GEMINI_API_SECRET environment
+    variables, and all requests go to the Gemini sandbox.
+
+    Attributes
+    ----------
+    running_task: Optional[Thread]
+        The order event listener thread, or None.
+    hb_task: Optional[Thread]
+        The heartbeat thread, or None.
+    send_hb
+        A heartbeat setting, always True.
+    ws
+        The order event WebSocket application, or None.
+    flags: Optional[ThreadFlags]
+        The flags that keep the heartbeat thread running, or None.
+
+    Methods
+    -------
+    is_fractionable
+        Return True for every symbol (overrides Trader).
+    check_error
+        Raise AssertionError if a Gemini response reports an error.
+    is_order_completed
+        Return the status, price, quantity and fees of an order (overrides
+        Trader).
+    get_market_schedule
+        Return the whole of today as the session (overrides Trader).
+    get_trading_days
+        Return every calendar day in a range (overrides Trader).
+    get_position
+        Return the balance held in a currency (overrides Trader).
+    get_order
+        Return the current state of an order (overrides Trader).
+    is_market_open_today
+        Return True (overrides Trader).
+    get_time_market_close
+        Return the time left in the day (overrides Trader).
+    reconnect
+        Restart the listener and heartbeat threads (overrides Trader).
+    heartbeat
+        Send heartbeats to Gemini until told to stop.
+    on_message
+        Publish order events from the stream as trade updates.
+    on_error
+        Log a stream error.
+    on_close
+        Log the closing of the stream.
+    run
+        Start the listener and heartbeat threads (overrides Trader).
+    close
+        Stop the listener and heartbeat threads (overrides Trader).
+    get_tradeable_symbols
+        Return the symbols traded on Gemini (overrides Trader).
+    get_shortable_symbols
+        Return an empty list (overrides Trader).
+    is_shortable
+        Return False (overrides Trader).
+    cancel_order
+        Request the cancellation of an order (overrides Trader).
+    submit_order
+        Submit an exchange limit order (overrides Trader).
+    """
+
     gemini_api_key: Optional[str] = os.getenv("GEMINI_API_KEY")
     gemini_api_secret: Optional[str] = os.getenv("GEMINI_API_SECRET")
     base_url = "https://api.sandbox.gemini.com"
@@ -32,6 +107,15 @@ class GeminiTrader(Trader):
     last_nonce = None
 
     def __init__(self, qm: QueueMapper = None):
+        """Initialize the trader with no listener running.
+
+        Register the trader as the current Trader instance.
+
+        Parameters
+        ----------
+        qm: QueueMapper, default None
+            The queue mapper that receives trade updates.
+        """
         self.running_task: Optional[Thread] = None
         self.hb_task: Optional[Thread] = None
         self.send_hb = True
@@ -41,6 +125,17 @@ class GeminiTrader(Trader):
 
     @classmethod
     def _generate_request_headers(cls, payload: Dict) -> Dict:
+        """Return signed headers for an authenticated REST request.
+
+        Parameters
+        ----------
+        payload: Dict
+            The request payload to sign; modified in place.
+
+        Raises
+        ------
+        Raise AssertionError if the API key or secret is not set.
+        """
         if not cls.gemini_api_secret or not cls.gemini_api_key:
             raise AssertionError(
                 "both env variables GEMINI_API_KEY and GEMINI_API_SECRET must be set up"
@@ -70,6 +165,17 @@ class GeminiTrader(Trader):
         }
 
     def _generate_ws_headers(self, payload: Dict) -> Dict:
+        """Return signed headers for the order event WebSocket connection.
+
+        Parameters
+        ----------
+        payload: Dict
+            The connection payload to sign; modified in place.
+
+        Raises
+        ------
+        Raise AssertionError if the API key or secret is not set.
+        """
         if not self.gemini_api_secret or not self.gemini_api_key:
             raise AssertionError(
                 "both env variables GEMINI_API_KEY and GEMINI_API_SECRET must be set up"
@@ -91,6 +197,13 @@ class GeminiTrader(Trader):
 
     @classmethod
     def _get_order_event_type(cls, order_data: Dict) -> Order.EventType:
+        """Return the event type for a Gemini order status.
+
+        Parameters
+        ----------
+        order_data: Dict
+            An order status returned by the Gemini REST API.
+        """
         return (
             Order.EventType.canceled
             if order_data["is_cancelled"] == True
@@ -101,6 +214,15 @@ class GeminiTrader(Trader):
 
     @classmethod
     def _get_trade_event_type(cls, trade_data: Dict) -> Order.EventType:
+        """Return the event type for a Gemini order event.
+
+        Report a cancel_rejected event as canceled.
+
+        Parameters
+        ----------
+        trade_data: Dict
+            An order event received from the WebSocket stream.
+        """
         return (
             Order.EventType.canceled
             if trade_data["type"] == "cancelled"
@@ -115,6 +237,13 @@ class GeminiTrader(Trader):
 
     @classmethod
     def _get_order_side(cls, order_data: Dict) -> Order.FillSide:
+        """Return the fill side of a Gemini order.
+
+        Parameters
+        ----------
+        order_data: Dict
+            An order returned by the Gemini REST API.
+        """
         return (
             Order.FillSide.buy
             if order_data["side"] == "buy"
@@ -123,6 +252,16 @@ class GeminiTrader(Trader):
 
     @classmethod
     def _order_from_dict(cls, order_data: Dict) -> Order:
+        """Return an Order built from a Gemini order status.
+
+        The trade fees are the total fees of the trades that the status
+        includes.
+
+        Parameters
+        ----------
+        order_data: Dict
+            An order status returned by the Gemini REST API.
+        """
         trades = order_data.get("trades", [])
         trade_fees: float = 0.0 + sum(float(t["fee_amount"]) for t in trades)
         return Order(
@@ -142,6 +281,15 @@ class GeminiTrader(Trader):
 
     @classmethod
     def _trade_from_dict(cls, trade_dict: Dict) -> Trade:
+        """Return a Trade built from a Gemini order event, and log the event.
+
+        Values missing from the event are reported as zero or an empty string.
+
+        Parameters
+        ----------
+        trade_dict: Dict
+            An order event received from the WebSocket stream.
+        """
         tlog(f"GEMINI GOING TO SEND {trade_dict}")
         return Trade(
             order_id=trade_dict["order_id"],
@@ -166,9 +314,23 @@ class GeminiTrader(Trader):
         )
 
     async def is_fractionable(self, symbol: str) -> bool:
+        """Return True, since every symbol is treated as fractionable.
+
+        Parameters
+        ----------
+        symbol: str
+            The symbol to check; ignored.
+        """
         return True
 
     def check_error(self, result: Dict):
+        """Raise AssertionError if a Gemini API response reports an error.
+
+        Parameters
+        ----------
+        result: Dict
+            A decoded JSON response from the Gemini REST API.
+        """
         if result.get("result") == "error":
             raise AssertionError(
                 f"[EXCEPTION] {result['reason']}:{result['message']}"
@@ -179,6 +341,19 @@ class GeminiTrader(Trader):
     ) -> Tuple[
         Order.EventType, Optional[float], Optional[float], Optional[float]
     ]:
+        """Return the status, average price, quantity and fees of an order.
+
+        Parameters
+        ----------
+        order_id: str
+            The Gemini order identifier.
+        external_order_id: Optional[str], default None
+            Ignored.
+
+        Raises
+        ------
+        Raise AssertionError if Gemini reports an error.
+        """
         order = await self.get_order(order_id)
         return (
             order.event,
@@ -190,6 +365,10 @@ class GeminiTrader(Trader):
     def get_market_schedule(
         self,
     ) -> Tuple[Optional[datetime], Optional[datetime]]:
+        """Return the start and end of today as the trading session.
+
+        Both times carry the UTC time zone.
+        """
         return datetime.now().replace(
             hour=0, minute=0, second=0, microsecond=0, tzinfo=utctz
         ), datetime.now().replace(
@@ -199,11 +378,37 @@ class GeminiTrader(Trader):
     def get_trading_days(
         self, start_date: date, end_date: date = date.today()
     ) -> pd.DataFrame:
+        """Return a DataFrame indexed by every calendar day in a range.
+
+        The DataFrame has no columns.
+
+        Parameters
+        ----------
+        start_date: date
+            The first day of the range.
+        end_date: date, default date.today()
+            The last day of the range.
+        """
         return pd.DataFrame(
             index=pd.date_range(start=start_date, end=end_date)
         )
 
     def get_position(self, symbol: str) -> float:
+        """Return the account balance held in a currency.
+
+        Parameters
+        ----------
+        symbol: str
+            The currency to look up.
+
+        Returns
+        -------
+        Return zero if no balance is held.
+
+        Raises
+        ------
+        Raise AssertionError if the request fails.
+        """
         symbol = symbol.lower()
         endpoint = "/v1/balances"
         url = self.base_url + endpoint
@@ -231,6 +436,19 @@ class GeminiTrader(Trader):
     async def get_order(
         self, order_id: str, client_order_id: Optional[str] = None
     ) -> Order:
+        """Return the current state of an order.
+
+        Parameters
+        ----------
+        order_id: str
+            The Gemini order identifier.
+        client_order_id: Optional[str], default None
+            Ignored.
+
+        Raises
+        ------
+        Raise AssertionError if Gemini reports an error.
+        """
         endpoint = "/v1/order/status"
         url = self.base_url + endpoint
 
@@ -253,19 +471,35 @@ class GeminiTrader(Trader):
         )
 
     def is_market_open_today(self) -> bool:
+        """Return True, since the market is treated as open every day."""
         return True
 
     def get_time_market_close(self) -> Optional[timedelta]:
+        """Return the time remaining until the end of the current day."""
         return datetime.now().replace(
             hour=23, minute=59, second=59, microsecond=0, tzinfo=utctz
         ) - datetime.now().replace(tzinfo=utctz)
 
     async def reconnect(self):
+        """Restart the order event listener and heartbeat threads."""
         await self.close()
         await self.run()
 
     @classmethod
     def heartbeat(cls, flags: ThreadFlags):
+        """Send heartbeats to Gemini until flags.run is cleared.
+
+        Block until stopped, so run it in a dedicated thread.
+
+        Parameters
+        ----------
+        flags: ThreadFlags
+            The thread flags whose run attribute keeps the heartbeat going.
+
+        Raises
+        ------
+        Raise AssertionError if a heartbeat fails.
+        """
         tlog("GEMINI HEARTBEAT thread starting")
         while flags.run:
             tlog("GEMINI HEARTBEAT")
@@ -289,6 +523,22 @@ class GeminiTrader(Trader):
 
     @classmethod
     def on_message(cls, ws, msgs):
+        """Publish order events from the Gemini stream as trade updates.
+
+        Log each fill, cancelled, cancel_rejected or rejected event and put it
+        as a trade update on every queue of the current trader.
+
+        Parameters
+        ----------
+        ws
+            The WebSocket application; unused.
+        msgs
+            The raw JSON text of a stream message.
+
+        Raises
+        ------
+        Raise queue.Full if a queue stays full.
+        """
         msgs = json.loads(msgs)
         if type(msgs) != list:
             return
@@ -320,13 +570,44 @@ class GeminiTrader(Trader):
 
     @classmethod
     def on_error(cls, ws, error):
+        """Log an error reported by the WebSocket connection.
+
+        Parameters
+        ----------
+        ws
+            The WebSocket application; unused.
+        error
+            The reported error.
+        """
         tlog(f"[ERROR] GeminiTrader {error}")
 
     @classmethod
     def on_close(cls, ws, close_status_code, close_msg):
+        """Log the closing of the WebSocket connection.
+
+        Parameters
+        ----------
+        ws
+            The WebSocket application; unused.
+        close_status_code
+            The close status code.
+        close_msg
+            The close message.
+        """
         tlog(f"on_close(): status={close_status_code}, close_msg={close_msg}")
 
     async def run(self):
+        """Start the order event listener and heartbeat threads.
+
+        Returns
+        -------
+        Return the listener thread; if it already exists, return it without
+        starting new threads.
+
+        Raises
+        ------
+        Raise AssertionError if the API key or secret is not set.
+        """
         if not self.running_task:
             tlog("starting Gemini listener")
             endpoint = "/v1/order/events"
@@ -351,6 +632,10 @@ class GeminiTrader(Trader):
         return self.running_task
 
     async def close(self):
+        """Stop the listener and heartbeat threads if the listener is running.
+
+        Block until both threads have finished.
+        """
         if self.running_task and self.running_task.is_alive():
             tlog(f"close task {self.running_task}")
             self.ws.keep_running = False
@@ -364,6 +649,12 @@ class GeminiTrader(Trader):
             self.flags = None
 
     async def get_tradeable_symbols(self) -> List[str]:
+        """Return the symbols that can be traded on Gemini.
+
+        Raises
+        ------
+        Raise AssertionError if the request fails.
+        """
         endpoint = "/v1/symbols"
         url = self.base_url + endpoint
         response = requests.get(url)
@@ -375,12 +666,35 @@ class GeminiTrader(Trader):
         )
 
     async def get_shortable_symbols(self) -> List[str]:
+        """Return an empty list, since short selling is not supported."""
         return []
 
     async def is_shortable(self, symbol) -> bool:
+        """Return False, since short selling is not supported.
+
+        Parameters
+        ----------
+        symbol
+            The symbol to check; ignored.
+        """
         return False
 
     async def cancel_order(self, order: Order) -> bool:
+        """Request the cancellation of an order.
+
+        Parameters
+        ----------
+        order: Order
+            The order to cancel.
+
+        Returns
+        -------
+        Return the status of the canceled order as reported by Gemini.
+
+        Raises
+        ------
+        Raise AssertionError if Gemini reports an error.
+        """
         endpoint = "/v1/order/cancel"
         url = self.base_url + endpoint
 
@@ -414,6 +728,53 @@ class GeminiTrader(Trader):
         trail_percent: str = None,
         on_behalf_of: str = None,
     ) -> Order:
+        """Submit an exchange limit order to Gemini.
+
+        A failed request also stops the listener threads.
+
+        Parameters
+        ----------
+        symbol: str
+            The asset symbol.
+        qty: float
+            The quantity, rounded to the precision of the asset.
+        side: str
+            Buy or sell.
+        order_type: str
+            The order type; market orders are rejected.
+        time_in_force: str, default None
+            Ignored.
+        limit_price: str, default None
+            The price of a limit order; other order types get a placeholder
+            price.
+        stop_price: str, default None
+            Ignored.
+        client_order_id: str, default None
+            The client identifier of the order.
+        extended_hours: bool, default None
+            Ignored.
+        order_class: str, default None
+            Ignored.
+        take_profit: dict, default None
+            Ignored.
+        stop_loss: dict, default None
+            Ignored.
+        trail_price: str, default None
+            Ignored.
+        trail_percent: str, default None
+            Ignored.
+        on_behalf_of: str, default None
+            Ignored.
+
+        Returns
+        -------
+        Return the new order.
+
+        Raises
+        ------
+        Raise AssertionError for a market order, a quantity below the asset
+        minimum or an error from Gemini, and ValueError for an unknown asset.
+        """
         symbol = symbol.lower()
         if order_type == "market":
             raise AssertionError(

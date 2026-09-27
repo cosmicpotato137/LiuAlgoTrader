@@ -1,3 +1,13 @@
+"""Create the configured market data and streaming providers.
+
+Functions
+---------
+data_loader_factory
+    Return a new historical data provider for a connector.
+streaming_factory
+    Return the streaming provider class for a connector.
+"""
+
 from liualgotrader.common import config
 from liualgotrader.common.types import DataConnectorType
 from liualgotrader.data.alpaca import AlpacaData, AlpacaStream
@@ -9,6 +19,17 @@ from liualgotrader.data.tradier import TradierData
 
 
 def data_loader_factory(connector: DataConnectorType = None) -> DataAPI:
+    """Return a new historical data provider for a connector.
+
+    Parameters
+    ----------
+    connector: DataConnectorType, default None
+        The data connector, or None for the configured connector.
+
+    Raises
+    ------
+    Raise Exception if the connector is not supported.
+    """
     _connector = connector or config.data_connector
     if _connector == DataConnectorType.polygon:
         return PolygonData()
@@ -25,6 +46,21 @@ def data_loader_factory(connector: DataConnectorType = None) -> DataAPI:
 
 
 def streaming_factory(connector: DataConnectorType = None):
+    """Return the streaming provider class for a connector.
+
+    Parameters
+    ----------
+    connector: DataConnectorType, default None
+        The data connector, or None for the configured connector.
+
+    Returns
+    -------
+    Return the class itself, not an instance.
+
+    Raises
+    ------
+    Raise Exception if the connector does not support streaming.
+    """
     _connector = connector or config.data_connector
     if _connector == DataConnectorType.polygon:
         return PolygonStream

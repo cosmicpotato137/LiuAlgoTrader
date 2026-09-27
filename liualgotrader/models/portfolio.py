@@ -1,3 +1,11 @@
+"""Persist and load trading portfolios.
+
+Classes
+-------
+Portfolio
+    Trading portfolio backed by a dedicated account.
+"""
+
 import json
 from typing import Dict, List, Optional, Tuple
 
@@ -11,6 +19,43 @@ from liualgotrader.models.accounts import Accounts
 
 
 class Portfolio:
+    """Trading portfolio backed by a dedicated account.
+
+    Attributes
+    ----------
+    portfolio_id: str
+        The portfolio identifier.
+    portfolio_size: float
+        The portfolio size.
+    parameters: Dict
+        The portfolio parameters.
+    account_id: Optional[int]
+        The identifier of the associated account, or None.
+    asset_type
+        The type of assets the portfolio trades.
+
+    Methods
+    -------
+    load_by_batch_id
+        Load the portfolio associated with a batch.
+    load_by_portfolio_id
+        Load a portfolio by its identifier.
+    save
+        Create a portfolio and its account.
+    associate_batch_id_to_profile
+        Associate a batch with a portfolio.
+    is_associated
+        Return whether a portfolio has an associated batch.
+    exists
+        Return whether a portfolio exists.
+    get_portfolio_account_balance
+        Return the balance of a portfolio.
+    get_external_account_id
+        Return the external account and broker.
+    list_portfolios
+        Return the portfolios that have not expired.
+    """
+
     def __init__(
         self,
         portfolio_id: str,
@@ -19,6 +64,21 @@ class Portfolio:
         account_id: Optional[int],
         parameters: Dict,
     ):
+        """Initialize a portfolio.
+
+        Parameters
+        ----------
+        portfolio_id: str
+            The portfolio identifier.
+        portfolio_size: float
+            The portfolio size.
+        asset_type: AssetType
+            The name of an AssetType member.
+        account_id: Optional[int]
+            The identifier of the associated account, or None.
+        parameters: Dict
+            The portfolio parameters.
+        """
         self.portfolio_id = portfolio_id
         self.portfolio_size = portfolio_size
         self.parameters = parameters
@@ -26,10 +86,24 @@ class Portfolio:
         self.asset_type = AssetType[str(asset_type)]
 
     def __str__(self):
+        """Return a readable description of the portfolio."""
         return f"id={self.portfolio_id} account-id={self.account_id} size={self.portfolio_size} asset_type={self.asset_type}, params={self.parameters}"
 
     @classmethod
     async def load_by_batch_id(cls, batch_id: str):
+        """Load the portfolio associated with a batch.
+
+        Connect to the database first if no pool exists yet.
+
+        Parameters
+        ----------
+        batch_id: str
+            The batch identifier.
+
+        Returns
+        -------
+        Return a Portfolio, or None if the batch has no portfolio.
+        """
         try:
             pool = config.db_conn_pool
         except AttributeError:
@@ -54,6 +128,19 @@ class Portfolio:
 
     @classmethod
     async def load_by_portfolio_id(cls, portfolio_id: str):
+        """Load a portfolio by its identifier.
+
+        Connect to the database first if no pool exists yet.
+
+        Parameters
+        ----------
+        portfolio_id: str
+            The portfolio identifier.
+
+        Returns
+        -------
+        Return a Portfolio, or None if it does not exist.
+        """
         try:
             pool = config.db_conn_pool
         except AttributeError:
@@ -86,6 +173,27 @@ class Portfolio:
         external_account_id: Optional[str] = None,
         broker: Optional[str] = None,
     ):
+        """Create a portfolio together with a dedicated account.
+
+        Connect to the database first if no pool exists yet.
+
+        Parameters
+        ----------
+        portfolio_id: str
+            The portfolio identifier.
+        portfolio_size: float
+            The portfolio size and opening account balance.
+        credit: float
+            The credit line, where a positive value allows a negative balance.
+        parameters: Dict
+            The portfolio parameters, also stored as account details.
+        asset_type: AssetType, default AssetType.US_EQUITIES
+            The type of assets traded.
+        external_account_id: Optional[str], default None
+            The account identifier at the broker, or None.
+        broker: Optional[str], default None
+            The broker name, or None.
+        """
         if not hasattr(config, "db_conn_pool"):
             await create_db_connection()
         pool = config.db_conn_pool
@@ -115,6 +223,15 @@ class Portfolio:
     async def associate_batch_id_to_profile(
         cls, portfolio_id: str, batch_id: str
     ) -> None:
+        """Associate a batch with a portfolio.
+
+        Parameters
+        ----------
+        portfolio_id: str
+            The portfolio identifier.
+        batch_id: str
+            The batch identifier.
+        """
         pool = config.db_conn_pool
         async with pool.acquire() as con:
             await con.execute(
@@ -130,6 +247,15 @@ class Portfolio:
     async def is_associated(
         cls, portfolio_id: str, batch_id: Optional[str] = None
     ) -> bool:
+        """Return whether a portfolio is associated with a batch.
+
+        Parameters
+        ----------
+        portfolio_id: str
+            The portfolio identifier.
+        batch_id: Optional[str], default None
+            The batch to check, or None for any batch.
+        """
         pool = config.db_conn_pool
         async with pool.acquire() as con:
             return (
@@ -159,6 +285,13 @@ class Portfolio:
 
     @classmethod
     async def exists(cls, portfolio_id: str) -> bool:
+        """Return whether a portfolio exists.
+
+        Parameters
+        ----------
+        portfolio_id: str
+            The portfolio identifier.
+        """
         pool = config.db_conn_pool
         async with pool.acquire() as con:
             result = await con.fetchval(
@@ -175,6 +308,17 @@ class Portfolio:
 
     @classmethod
     async def get_portfolio_account_balance(cls, portfolio_id: str) -> float:
+        """Return the balance of the account of a portfolio.
+
+        Parameters
+        ----------
+        portfolio_id: str
+            The portfolio identifier.
+
+        Returns
+        -------
+        Return None if the portfolio does not exist.
+        """
         pool = config.db_conn_pool
 
         async with pool.acquire() as con:
@@ -195,6 +339,17 @@ class Portfolio:
     async def get_external_account_id(
         cls, portfolio_id: str
     ) -> Tuple[Optional[str], Optional[str]]:
+        """Return the external account identifier and broker of a portfolio.
+
+        Parameters
+        ----------
+        portfolio_id: str
+            The portfolio identifier.
+
+        Returns
+        -------
+        Return the two values as a tuple; either may be None.
+        """
         pool = config.db_conn_pool
         async with pool.acquire() as con:
             r = await con.fetchrow(
@@ -213,6 +368,16 @@ class Portfolio:
 
     @classmethod
     async def list_portfolios(cls) -> List[str]:
+        """Return the portfolios that have not expired, newest first.
+
+        A portfolio appears once for each of its account transactions, or once
+        if it has none. Connect to the database first if no pool exists yet.
+
+        Returns
+        -------
+        Return a DataFrame with the columns portfolio_id, last_transaction,
+        size, parameters, assets and tstamp.
+        """
         try:
             pool = config.db_conn_pool
         except AttributeError:

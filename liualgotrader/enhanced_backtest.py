@@ -1,3 +1,35 @@
+"""Backtest scanners and strategies on past market data.
+
+Functions
+---------
+create_scanners
+    Instantiate the scanners configured in the trade plan.
+create_strategies
+    Instantiate the strategies configured in the trade plan.
+do_scanners
+    Run the scanners due at a given time and record their results.
+calculate_execution_price
+    Return the simulated execution price of an order.
+do_strategy_result
+    Simulate a strategy's order and record the trade.
+do_strategy_all
+    Run a strategy's run_all method and execute its orders.
+do_strategy_by_symbol
+    Run a strategy's run method for each symbol.
+do_strategy
+    Run a strategy through run_all or run, as should_run_all selects.
+get_day_start_end
+    Return the start and end timestamps of a trading day.
+backtest_day
+    Simulate a single trading day, one time step at a time.
+backtest_time_range
+    Run the backtest for every trading day in a range.
+backtest_main
+    Prepare and run a complete backtesting session.
+backtest
+    Run a backtesting session and return its batch identifier.
+"""
+
 import asyncio
 import inspect
 import traceback
@@ -31,6 +63,22 @@ async def create_scanners(
     scanners_conf: Dict,
     scanner_names: Optional[List],
 ) -> List[Scanner]:
+    """Instantiate the scanners configured in the trade plan.
+
+    Parameters
+    ----------
+    data_loader: DataLoader
+        The loader passed to every scanner.
+    scanners_conf: Dict
+        The scanner settings, keyed by scanner name; the "filename" entry of a
+        custom scanner is removed.
+    scanner_names: Optional[List]
+        The scanners to create, or None or empty for all.
+
+    Returns
+    -------
+    Return the scanners in configuration order.
+    """
     scanners: List = []
     for scanner_name in scanners_conf:
         if scanner_names and scanner_name not in scanner_names:
@@ -60,6 +108,27 @@ async def create_strategies(
     dl: DataLoader,
     strategy_names: Optional[List],
 ) -> List[Strategy]:
+    """Instantiate the strategies configured in the trade plan.
+
+    Set config.env to "BACKTEST".
+
+    Parameters
+    ----------
+    uid: str
+        The batch identifier of the strategies.
+    conf_dict: Dict
+        The strategy settings, keyed by strategy name; each "filename" entry is
+        removed.
+    dl: DataLoader
+        The loader passed to every strategy.
+    strategy_names: Optional[List]
+        The strategies to create, or None or empty for all.
+
+    Returns
+    -------
+    Return the strategies in configuration order, with None for a strategy
+    whose create method returned False.
+    """
     strategies = []
     config.env = "BACKTEST"
 
@@ -82,6 +151,25 @@ async def create_strategies(
 async def do_scanners(
     now: datetime, scanners: List[Scanner], symbols: Dict
 ) -> Dict:
+    """Run the scanners that are due at a given time and record their results.
+
+    A scanner without a recurrence runs at most once per calendar day, and any
+    other scanner runs once its recurrence has elapsed.
+
+    Parameters
+    ----------
+    now: datetime
+        The simulated current time.
+    scanners: List[Scanner]
+        The scanners to consider.
+    symbols: Dict
+        The scanned symbols, keyed by target strategy name or "_all"; updated
+        in place.
+
+    Returns
+    -------
+    Return symbols.
+    """
     for scanner in scanners:
         if scanner in run_scanners:
             if not scanner.recurrence:
@@ -108,6 +196,27 @@ async def do_scanners(
 async def calculate_execution_price(
     symbol: str, data_loader: DataLoader, what: Dict, now: datetime
 ) -> float:
+    """Return the simulated execution price of an order at a given time.
+
+    Fill a market order or a limit buy at the closing price, and a limit sell
+    at its limit price.
+
+    Parameters
+    ----------
+    symbol: str
+        The symbol of the order.
+    data_loader: DataLoader
+        The loader that provides closing prices.
+    what: Dict
+        The order, with a "type" and, unless it is "market", a "side" and a
+        "limit_price".
+    now: datetime
+        The time of execution.
+
+    Raises
+    ------
+    Raise Exception if a limit order cannot be filled at the closing price.
+    """
     if what["type"] == "market":
         return data_loader[symbol].close[now]
 
@@ -137,6 +246,34 @@ async def do_strategy_result(
     buy_fee_percentage: float = 0.0,
     sell_fee_percentage: float = 0.0,
 ) -> bool:
+    """Simulate the execution of a strategy's order and record the trade.
+
+    Notify the strategy through its buy or sell callback, update the positions
+    in trading_data and save the trade to the database.
+
+    Parameters
+    ----------
+    data_loader: DataLoader
+        The loader that provides prices.
+    strategy: Strategy
+        The strategy that placed the order.
+    symbol: str
+        The symbol of the order.
+    now: datetime
+        The time of execution.
+    what: Dict
+        The order, with a "qty", a "side" and the fields required by
+        calculate_execution_price.
+    buy_fee_percentage: float, default 0.0
+        The buy fee, as a percentage of the trade value.
+    sell_fee_percentage: float, default 0.0
+        The sell fee, as a percentage of the trade value.
+
+    Returns
+    -------
+    Return True on success, or False, with no other effect, if pricing or the
+    callback fails.
+    """
     global portfolio_value
 
     qty = float(what["qty"])
@@ -220,6 +357,31 @@ async def do_strategy_all(
     buy_fee_percentage: float,
     sell_fee_percentage: float,
 ):
+    """Run a strategy's run_all method once and execute the returned orders.
+
+    Execute all other orders before buy orders.
+
+    Parameters
+    ----------
+    data_loader: DataLoader
+        The loader passed to the strategy.
+    now: pd.Timestamp
+        The simulated current time.
+    strategy: Strategy
+        The strategy to run.
+    symbols: List[str]
+        The symbols to include in the strategy's positions.
+    trader: Trader
+        The trader passed to the strategy.
+    buy_fee_percentage: float
+        The buy fee, as a percentage of the trade value.
+    sell_fee_percentage: float
+        The sell fee, as a percentage of the trade value.
+
+    Raises
+    ------
+    Log and re-raise any exception.
+    """
     try:
         sig = inspect.signature(strategy.run_all)
         param = {
@@ -262,6 +424,26 @@ async def do_strategy_by_symbol(
     strategy: Strategy,
     symbols: List[str],
 ):
+    """Run a strategy's run method for each symbol and execute its orders.
+
+    Execute orders without trading fees.
+
+    Parameters
+    ----------
+    data_loader: DataLoader
+        The loader that provides symbol data.
+    now: pd.Timestamp
+        The simulated current time.
+    strategy: Strategy
+        The strategy to run.
+    symbols: List[str]
+        The symbols to run the strategy on.
+
+    Raises
+    ------
+    Log and skip a symbol that raises ValueError, and log and re-raise any
+    other exception.
+    """
     global portfolio_value
     for symbol in symbols:
         try:
@@ -300,6 +482,25 @@ async def do_strategy(
     buy_fee_percentage: float,
     sell_fee_percentage: float,
 ):
+    """Run a strategy through run_all or run, as its should_run_all selects.
+
+    Parameters
+    ----------
+    data_loader: DataLoader
+        The loader that provides symbol data.
+    now: pd.Timestamp
+        The simulated current time.
+    strategy: Strategy
+        The strategy to run.
+    symbols: List[str]
+        The symbols to run the strategy on.
+    trader: Trader
+        The trader, used only by run_all.
+    buy_fee_percentage: float
+        The buy fee percentage, used only by run_all.
+    sell_fee_percentage: float
+        The sell fee percentage, used only by run_all.
+    """
     if await strategy.should_run_all():
         await do_strategy_all(
             data_loader,
@@ -315,6 +516,22 @@ async def do_strategy(
 
 
 def get_day_start_end(asset_type, day):
+    """Return the start and end timestamps of a trading day.
+
+    A US equities day spans market hours and a crypto day spans the whole date,
+    both in the America/New_York time zone.
+
+    Parameters
+    ----------
+    asset_type
+        The type of asset traded.
+    day
+        A market calendar entry for US equities, or a date for crypto.
+
+    Raises
+    ------
+    Raise AssertionError for any other asset type.
+    """
     if asset_type == AssetType.US_EQUITIES:
         day_start = day.date.replace(
             hour=day.open.hour,
@@ -355,6 +572,39 @@ async def backtest_day(
     buy_fee_percentage: float,
     sell_fee_percentage: float,
 ):
+    """Simulate a single trading day, one time step at a time.
+
+    At each step, run the due scanners and run each strategy on the symbols
+    scanned for it or for all strategies.
+
+    Parameters
+    ----------
+    day
+        The day, as accepted by get_day_start_end.
+    scanners
+        The scanners to run.
+    symbols
+        The scanned symbols, keyed by target strategy name or "_all"; updated
+        in place.
+    strategies
+        The strategies to run.
+    scale
+        The time step of the simulation.
+    data_loader
+        The loader that provides symbol data.
+    asset_type: AssetType
+        The type of asset traded.
+    trader: Trader
+        The trader passed to the strategies.
+    buy_fee_percentage: float
+        The buy fee, as a percentage of the trade value.
+    sell_fee_percentage: float
+        The sell fee, as a percentage of the trade value.
+
+    Raises
+    ------
+    Log and re-raise TypeError if a scanner result is not a list of symbols.
+    """
     day_start, day_end = get_day_start_end(asset_type, day)
     print(day_start, day_end)
     current_time = day_start
@@ -426,6 +676,36 @@ async def backtest_time_range(
     scanners: Optional[List] = None,
     strategies: Optional[List] = None,
 ):
+    """Run the backtest for every trading day in a date range.
+
+    Use the Alpaca market calendar for US equities and every calendar day for
+    crypto.
+
+    Parameters
+    ----------
+    from_date: date
+        The first day of the range.
+    to_date: date
+        The last day of the range.
+    scale: TimeScale
+        The time step of the simulation.
+    data_loader: DataLoader
+        The loader that provides symbol data.
+    buy_fee_percentage: float
+        The buy fee, as a percentage of the trade value.
+    sell_fee_percentage: float
+        The sell fee, as a percentage of the trade value.
+    asset_type: AssetType
+        The type of asset traded.
+    scanners: Optional[List], default None
+        The scanners to run.
+    strategies: Optional[List], default None
+        The strategies to run.
+
+    Raises
+    ------
+    Raise AssertionError for any other asset type.
+    """
     trade_api = tradeapi.REST(
         key_id=config.alpaca_api_key, secret_key=config.alpaca_api_secret
     )
@@ -467,6 +747,35 @@ async def backtest_main(
     scanners: Optional[List] = None,
     strategies: Optional[List] = None,
 ) -> None:
+    """Prepare and run a complete backtesting session.
+
+    Connect to the database, and set the module-level portfolio value from the
+    trade plan when it has one.
+
+    Parameters
+    ----------
+    uid: str
+        The batch identifier of the session.
+    from_date: date
+        The first day to backtest.
+    to_date: date
+        The last day to backtest.
+    scale: TimeScale
+        The time scale of the simulation.
+    tradeplan: Dict
+        The trade plan, with a "strategies" section and an optional "scanners"
+        section and "portfolio_value" setting.
+    buy_fee_percentage: float
+        The buy fee, as a percentage of the trade value.
+    sell_fee_percentage: float
+        The sell fee, as a percentage of the trade value.
+    asset_type: AssetType
+        The type of asset traded.
+    scanners: Optional[List], default None
+        The names of the scanners to create, or None for all.
+    strategies: Optional[List], default None
+        The names of the strategies to create, or None for all.
+    """
     tlog(
         f"Starting back-test from {from_date} to {to_date} with time scale {scale}"
     )
@@ -518,6 +827,32 @@ def backtest(
     buy_fee_percentage: float,
     sell_fee_percentage: float,
 ) -> str:
+    """Run a backtesting session and return its batch identifier.
+
+    Do not call from a coroutine. Log, rather than raise, any error or keyboard
+    interrupt, and print the batch identifier in all cases.
+
+    Parameters
+    ----------
+    from_date: date
+        The first day to backtest.
+    to_date: date
+        The last day to backtest.
+    scale: TimeScale
+        The time scale of the simulation.
+    config: Dict
+        The trade plan.
+    scanners: Optional[List]
+        The names of the scanners to create, or None for all.
+    strategies: Optional[List]
+        The names of the strategies to create, or None for all.
+    asset_type: AssetType
+        The type of asset traded.
+    buy_fee_percentage: float
+        The buy fee, as a percentage of the trade value.
+    sell_fee_percentage: float
+        The sell fee, as a percentage of the trade value.
+    """
     uid = str(uuid.uuid4())
     try:
         if not asyncio.get_event_loop().is_closed():

@@ -1,3 +1,24 @@
+"""Locate support, resistance and stop price levels.
+
+Classes
+-------
+StopRangeType
+    Enumeration of the look-back windows for price levels.
+
+Functions
+---------
+grouper
+    Yield runs of consecutive values that lie close to one another.
+find_resistances
+    Asynchronously find resistance levels at or above a price.
+find_supports
+    Return the local price minima below the current value.
+find_stop
+    Return the most recent local price minimum as a stop level.
+get_local_maxima
+    Return the local maxima of a series.
+"""
+
 from datetime import datetime, timedelta
 from enum import Enum
 from typing import List, Optional
@@ -14,6 +35,8 @@ est = pytz.timezone("US/Eastern")
 
 
 class StopRangeType(Enum):
+    """Enumeration of the look-back windows for locating price levels."""
+
     LAST_100_MINUTES = 1
     LAST_2_HOURS = 2
     LAST_3_HOURS = 3
@@ -23,6 +46,16 @@ class StopRangeType(Enum):
 
 
 def grouper(iterable):
+    """Yield runs of consecutive values that lie close to one another.
+
+    Start a new group, yielded as a list, when a value differs from its
+    predecessor by more than config.group_margin, relative to the predecessor.
+
+    Parameters
+    ----------
+    iterable
+        The numeric values to group.
+    """
     prev = None
     group = []
     for item in iterable:
@@ -49,8 +82,27 @@ async def find_resistances(
     minute_history: df,
     debug=False,
 ) -> Optional[List[float]]:
-    """calculate supports"""
+    """Return the resistance levels at or above the current value.
 
+    Parameters
+    ----------
+    symbol: str
+        The symbol; has no effect.
+    strategy_name: str
+        The calling strategy; has no effect.
+    current_value: float
+        The current price.
+    minute_history: df
+        The minute bars of the symbol.
+    debug, default False
+        Has no effect.
+
+    Returns
+    -------
+    Return, in ascending order, the local maxima of the 15-minute highs of the
+    close during market hours over the last three days, or None if none reach
+    current_value.
+    """
     est = pytz.timezone("America/New_York")
     back_time = ts(datetime.now(est)).to_pydatetime() - timedelta(days=3)
     back_time_index = minute_history["close"].index.get_loc(
@@ -83,6 +135,29 @@ def find_supports(
     now: datetime,
     range_type: StopRangeType = StopRangeType.LAST_100_MINUTES,
 ):
+    """Return the local price minima that lie below the current value.
+
+    Search the five-minute lows of the window.
+
+    Parameters
+    ----------
+    current_value
+        The current price.
+    minute_history
+        The minute bars of the symbol.
+    now: datetime
+        The current time, whose day limits the search.
+    range_type: StopRangeType, default StopRangeType.LAST_100_MINUTES
+        The look-back window.
+
+    Returns
+    -------
+    Return None if the window has no local minimum.
+
+    Raises
+    ------
+    Raise NotImplementedError for the weekly and date ranges.
+    """
     # get low Series based on select time-range
     if range_type == StopRangeType.DAILY:
         series = (
@@ -124,6 +199,30 @@ def find_stop(
     now: datetime,
     range_type: StopRangeType = StopRangeType.LAST_100_MINUTES,
 ):
+    """Return the most recent local price minimum as a stop level.
+
+    Search the five-minute lows of the window.
+
+    Parameters
+    ----------
+    current_value
+        The current price; has no effect.
+    minute_history
+        The minute bars of the symbol.
+    now: datetime
+        The current time, whose day limits the search.
+    range_type: StopRangeType, default StopRangeType.LAST_100_MINUTES
+        The look-back window, where any window but the daily one means the last
+        100 minutes.
+
+    Returns
+    -------
+    Return None if there is no local minimum.
+
+    Raises
+    ------
+    Raise NotImplementedError for the weekly and date ranges.
+    """
     if range_type in (StopRangeType.DATE_RANGE, StopRangeType.WEEKLY):
         raise NotImplementedError(
             f"stop-range type {range_type} is not implemented"
@@ -157,7 +256,21 @@ def get_local_maxima(
     series: pd.Series,
     debug=False,
 ) -> pd.Series:
-    """calculate local maximal point"""
+    """Return the local maxima of a series.
+
+    Search the five-minute highs of series.
+
+    Parameters
+    ----------
+    series: pd.Series
+        The time-indexed values to search.
+    debug, default False
+        Has no effect.
+
+    Returns
+    -------
+    Return the maxima indexed by time, or an empty series if there are none.
+    """
     if series.empty:
         return pd.Series([], dtype=np.float64)
 

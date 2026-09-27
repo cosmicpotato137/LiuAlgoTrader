@@ -1,3 +1,17 @@
+"""Live trading with the trade plan.
+
+Usage: trader
+Trade live with the trade plan, tradeplan.toml, read from TRADEPLAN_DIR or
+else the current directory.
+
+Functions
+---------
+motd
+    Log the welcome banner.
+main_cli
+    Run the live trading processes from the command line and exit.
+"""
+
 import copy
 import multiprocessing as mp
 import os
@@ -19,8 +33,17 @@ from liualgotrader.scanners_runner import main
 
 
 def motd(filename: str, version: str, unique_id: str) -> None:
-    """Display welcome message"""
+    """Log the welcome banner.
 
+    Parameters
+    ----------
+    filename: str
+        The script file name.
+    version: str
+        The build label.
+    unique_id: str
+        The batch identifier of the run.
+    """
     tlog("++++++++++++++++++++++++++++++++++++++++++++++++++++++++++")
     tlog("++++++++++++++++++++++++++++++++++++++++++++++++++++++++++")
     tlog(f"{filename} {version} starting")
@@ -30,6 +53,12 @@ def motd(filename: str, version: str, unique_id: str) -> None:
 
 
 def main_cli():
+    """Run the live trading processes from the command line and exit.
+
+    Start the consumer and producer processes, and a scanners process when the
+    trade plan has a scanners section, and wait for them to finish. Stop them
+    all on a keyboard interrupt. Exit if the trade plan is not found.
+    """
     config.filename = os.path.basename(__file__)
     mp.set_start_method("spawn")
 

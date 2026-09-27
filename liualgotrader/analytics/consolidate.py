@@ -1,3 +1,11 @@
+"""Consolidate the results of a trading batch.
+
+Functions
+---------
+trades
+    Save the gain, loss and trade analysis records of a batch.
+"""
+
 import pandas as pd
 from pandas import DataFrame, Timestamp
 
@@ -11,8 +19,17 @@ from liualgotrader.models.gain_loss import GainLoss, TradeAnalysis
 
 @timeit
 async def trades(batch_id: str) -> None:
-    """Go over all trades in a batch, and populate gain_loss table"""
+    """Save the gain, loss and trade analysis records of a batch.
 
+    Create the shared database connection pool, save the gains of each symbol
+    per run and each closed trade, and log how many trades remain open. Do
+    nothing more if the batch has no trades.
+
+    Parameters
+    ----------
+    batch_id: str
+        The batch identifier; an empty string does nothing.
+    """
     if not len(batch_id):
         return
 

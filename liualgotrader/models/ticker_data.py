@@ -1,3 +1,13 @@
+"""Persist and load ticker descriptions and daily price data.
+
+Classes
+-------
+TickerData
+    Descriptive information about a ticker.
+StockOhlc
+    Daily price and volume data for a symbol.
+"""
+
 import json
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -12,6 +22,35 @@ from liualgotrader.common.tlog import tlog
 
 @dataclass
 class TickerData:
+    """Descriptive information about a ticker.
+
+    Attributes
+    ----------
+    name: str
+        The ticker name.
+    symbol: str
+        The ticker symbol.
+    description: str
+        The ticker description.
+    tags: List[str]
+        The tags assigned to the ticker.
+    similar_tickers: List[str]
+        The symbols of similar tickers.
+    industry: str
+        The industry.
+    sector: str
+        The sector.
+    exchange: str
+        The exchange the ticker trades on.
+
+    Methods
+    -------
+    load_symbols
+        Return every stored ticker symbol.
+    save
+        Save the ticker, replacing any ticker with the same symbol.
+    """
+
     name: str
     symbol: str
     description: str
@@ -23,6 +62,17 @@ class TickerData:
 
     @classmethod
     async def load_symbols(cls, pool: Pool = None) -> List[str]:
+        """Return every stored ticker symbol.
+
+        Parameters
+        ----------
+        pool: Pool, default None
+            The connection pool, or None for the shared pool.
+
+        Raises
+        ------
+        Raise Exception if no tickers are stored.
+        """
         if not pool:
             pool = config.db_conn_pool
 
@@ -41,6 +91,18 @@ class TickerData:
                     raise Exception("no data")
 
     async def save(self, pool: Pool) -> bool:
+        """Save this ticker, replacing any ticker with the same symbol.
+
+        Parameters
+        ----------
+        pool: Pool
+            The connection pool.
+
+        Returns
+        -------
+        Return True on success, or False if the database has too many
+        connections.
+        """
         try:
             async with pool.acquire() as con:
                 async with con.transaction():
@@ -74,6 +136,41 @@ class TickerData:
 
 @dataclass
 class StockOhlc:
+    """Daily price and volume data for a symbol.
+
+    Attributes
+    ----------
+    symbol: str
+        The ticker symbol.
+    symbol_date: date
+        The trading date.
+    open: float
+        The opening price.
+    high: float
+        The high price.
+    low: float
+        The low price.
+    close: float
+        The closing price.
+    volume: int
+        The traded volume.
+    indicators: Dict
+        The indicators for the date.
+    create_tstamp: Optional[datetime]
+        The time the record was created, or None.
+
+    Methods
+    -------
+    check_stock_date_exists
+        Return whether data exists for a date.
+    get_latest_date
+        Return the latest date with data for a symbol.
+    load_by_date
+        Load the data of every symbol for a date.
+    save
+        Save the record, replacing any record for the same date.
+    """
+
     symbol: str
     symbol_date: date
     open: float
@@ -88,6 +185,17 @@ class StockOhlc:
     async def check_stock_date_exists(
         cls, symbol: str, symbol_date: date, pool: Pool = None
     ) -> bool:
+        """Return whether daily data exists for a symbol on a date.
+
+        Parameters
+        ----------
+        symbol: str
+            The ticker symbol.
+        symbol_date: date
+            The trading date.
+        pool: Pool, default None
+            The connection pool, or None for the shared pool.
+        """
         if not pool:
             pool = config.db_conn_pool
 
@@ -111,6 +219,19 @@ class StockOhlc:
 
     @classmethod
     async def get_latest_date(cls, symbol: str, pool: Pool = None) -> date:
+        """Return the latest date with daily data for a symbol.
+
+        Parameters
+        ----------
+        symbol: str
+            The ticker symbol.
+        pool: Pool, default None
+            The connection pool, or None for the shared pool.
+
+        Returns
+        -------
+        Return None if the symbol has no data.
+        """
         if not pool:
             pool = config.db_conn_pool
 
@@ -132,6 +253,19 @@ class StockOhlc:
     async def load_by_date(
         cls, symbol_date: date, pool: Pool = None
     ) -> Dict[str, object]:
+        """Load the daily data of every symbol for a date.
+
+        Parameters
+        ----------
+        symbol_date: date
+            The trading date.
+        pool: Pool, default None
+            The connection pool, or None for the shared pool.
+
+        Returns
+        -------
+        Return a dictionary that maps each symbol to its StockOhlc record.
+        """
         if not pool:
             pool = config.db_conn_pool
 
@@ -166,6 +300,13 @@ class StockOhlc:
         self,
         pool: Pool = None,
     ) -> None:
+        """Save this record, replacing any record for its symbol and date.
+
+        Parameters
+        ----------
+        pool: Pool, default None
+            The connection pool, or None for the shared pool.
+        """
         if not pool:
             pool = config.db_conn_pool
 
