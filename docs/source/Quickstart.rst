@@ -4,16 +4,18 @@
 Prerequisite
 ------------
 
-1. Paper, or a funded account with Alpaca_ Markets, 
+1. Python 3.12 or later,
+
+2. Paper, or a funded account with Alpaca_ Markets, 
 
 .. _Alpaca: https://alpaca.markets/docs/about-us
 
 
-2. Installed Docker Engine_ and,
+3. Installed Docker Engine_ and,
 
 .. _Engine: https://docs.docker.com/engine/install
 
-3. Docker Compose_
+4. Docker Compose_
 
 .. _Compose: https://docs.docker.com/compose/install/
 
@@ -23,7 +25,7 @@ Touch & Go
 
 **NOTE** for Windows_ users
 
-.. _Windows: https://liualgotrader.readthedocs.io/en/latest/Troubleshooting.html#q-can-i-run-liu-on-windows
+.. _Windows: https://liualgotrader-v2.readthedocs.io/en/latest/Troubleshooting.html#q-can-i-run-liu-on-windows
 
 **Step 1**: install LiuAlgoTrader
 
@@ -33,7 +35,7 @@ Touch & Go
 
 Having issues on installation? Check out the installation FAQ_
 
-.. _FAQ: https://liualgotrader.readthedocs.io/en/latest/Troubleshooting.html
+.. _FAQ: https://liualgotrader-v2.readthedocs.io/en/latest/Troubleshooting.html
 
 **Step 2**: Run the setup wizard
 

@@ -1,4 +1,3 @@
-import asyncio
 import uuid
 
 import pandas as pd
@@ -9,12 +8,9 @@ from liualgotrader.common.types import AssetType
 from liualgotrader.models.portfolio import Portfolio
 
 
-@pytest.fixture
-def event_loop():
-    loop = asyncio.new_event_loop()
-    loop.run_until_complete(create_db_connection())
-    yield loop
-    loop.close()
+@pytest.fixture(autouse=True)
+async def db_connection():
+    await create_db_connection()
 
 
 @pytest.mark.asyncio

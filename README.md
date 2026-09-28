@@ -1,9 +1,7 @@
 # LiuAlgoTrader
 [![pdm-managed](https://img.shields.io/badge/pdm-managed-blueviolet)](https://pdm.fming.dev)
 ![PyPI - Python Version](https://img.shields.io/pypi/pyversions/liualgotrader)
-[![Python 3](https://pyup.io/repos/github/amor71/LiuAlgoTrader/python-3-shield.svg)](https://pyup.io/repos/github/amor71/LiuAlgoTrader/)
-[![Updates](https://pyup.io/repos/github/amor71/LiuAlgoTrader/shield.svg)](https://pyup.io/repos/github/amor71/LiuAlgoTrader/)
-[![Documentation Status](https://readthedocs.org/projects/liualgotrader/badge/?version=latest)](https://liualgotrader.readthedocs.io/en/latest/?badge=latest)
+[![Documentation Status](https://readthedocs.org/projects/liualgotrader-v2/badge/?version=latest)](https://liualgotrader-v2.readthedocs.io/en/latest/?badge=latest)
 [![Tested with Hypothesis](https://img.shields.io/badge/hypothesis-tested-brightgreen.svg)](https://hypothesis.readthedocs.io/)
 [![Gitter](https://badges.gitter.im/LiuAlgoTrader/community.svg)](https://gitter.im/LiuAlgoTrader/community?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge)
 [![Sourcery](https://img.shields.io/badge/Sourcery-enabled-brightgreen)](https://sourcery.ai)
@@ -38,6 +36,7 @@ LiuAlgoTrader comes equipped with powerful & user-friendly back-testing tool.
 
 ### Prerequisite
 
+- Python 3.12 or later,
 - Paper, and/or a funded account with [Alpaca Markets](https://alpaca.markets/docs/about-us/).
 OR Polygon.io subscription optional (`Starter` plan and above),
 - Installed [Docker Engine](https://docs.docker.com/engine/install/) and [Docker Compose](https://docs.docker.com/compose/install/)
@@ -49,7 +48,7 @@ To install LiuAlgoTrader just type:
 
 `pip install liualgotrader`
 
-Having issues installation? check out the [installation FAQ page](https://liualgotrader.readthedocs.io/en/latest/Troubleshooting.html)
+Having issues installation? check out the [installation FAQ page](https://liualgotrader-v2.readthedocs.io/en/latest/Troubleshooting.html)
  
 **Step 2**: To configure the frame work type:
 
@@ -59,7 +58,7 @@ and follow the installation wizard instructions. The wizard will walk you
 through the configuration of environment variables, setup of a local 
 dockerized PostgreSQL and pre-populate with test data. 
  
-**Note** for [WINDOWS](https://liualgotrader.readthedocs.io/en/latest/Troubleshooting.html#q-can-i-run-liu-on-windows) users
+**Note** for [WINDOWS](https://liualgotrader-v2.readthedocs.io/en/latest/Troubleshooting.html#q-can-i-run-liu-on-windows) users
 ### Try the samples
 
 LiuAlgoTrader `quickstart` wizard installs samples allowing a first-time experience of the framework. Follow the post-installation instructions, and try to back-test a specific day.   
@@ -96,7 +95,7 @@ The framework includes a wide ranges of analysis `Jupyter Notebooks`, as well as
 
 ## What's Next?
 
-Read the [documentation](https://liualgotrader.readthedocs.io/en/latest/) and learn how to use LiuAlgoTrader to develop, deploy & testing money making strategies.
+Read the [documentation](https://liualgotrader-v2.readthedocs.io/en/latest/) and learn how to use LiuAlgoTrader to develop, deploy & testing money making strategies.
 
 ## Watch the Evolution
 
@@ -110,6 +109,9 @@ Do you have a suggestion, comment, idea for improvement or
 a have a wish-list item? Please read our
 [Contribution Document](https://github.com/amor71/LiuAlgoTrader/blob/master/CONTRIBUTING.md) or 
 email me at  amor71@sgeltd.com
+
+To set up a development environment, see
+[How to setup a development environment](https://liualgotrader-v2.readthedocs.io/en/latest/How%20to%20Contribute.html#how-to-setup-a-development-environment).
 
 ## Contributors
 

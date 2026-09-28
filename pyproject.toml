@@ -5,64 +5,70 @@ authors = [
   {name = "AMOR71", email = "amor71@sgeltd.com"},
 ]
 classifiers = [
-  "Programming Language :: Python :: 3.9",
-  "Programming Language :: Python :: 3.10",
-  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
   "Operating System :: OS Independent",
 ]
 dependencies = [
-  "iso8601",
-  "requests",
-  "deprecated",
-  "urllib3",
-  "numpy",
-  "alpaca-trade-api",
-  "asyncpg",
-  "pygit2",
-  "matplotlib",
-  "tabulate",
-  "streamlit",
-  "stockstats",
-  "empyrical",
-  "nest-asyncio",
-  "parsedatetime",
-  "scipy",
-  "polygon-api-client",
-  "finnhub-python",
-  "quantstats",
-  "tqdm",
-  "toml",
-  "fire",
-  "pandas-market-calendars",
-  "psutil",
-  "aiohttp>=3.8.3",
+  "iso8601>=2.1.0",
+  "requests>=2.34.2",
+  "deprecated>=3.0.0",
+  "urllib3>=2.8.0",
+  "numpy>=2.5.3",
+  "alpaca-py>=0.44.0",
+  "asyncpg>=0.31.0",
+  "pygit2>=1.20.1",
+  "matplotlib>=3.11.2",
+  "tabulate>=0.10.0",
+  "streamlit>=1.64.0",
+  "stockstats>=0.6.8",
+  "empyrical-reloaded>=0.5.12",
+  "nest-asyncio>=1.6.0",
+  "parsedatetime>=2.6",
+  "scipy>=1.18.1",
+  "polygon-api-client>=1.16.3",
+  "finnhub-python>=2.4.29",
+  "quantstats>=0.0.85",
+  "tqdm>=4.70.1",
+  "toml>=0.10.2",
+  "fire>=0.7.1",
+  "pandas-market-calendars>=5.4.0",
+  "psutil>=7.2.2",
+  "aiohttp>=3.14.3",
+  "pandas>=3.0.6",
+  "pytz>=2026.4",
+  "python-dateutil>=2.9.0.post0",
+  "websocket-client>=1.9.2",
 ]
 description = "a Pythonic all-batteries-included framework for effective algorithmic trading. The framework is intended to simplify development, testing, deployment and evaluating algo trading strategies."
 license = {text = "MIT"}
 name = "liualgotrader"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 version = "0.4.35"
 [project.optional-dependencies]
 dev = [
-    "therapist>=2.2.0",
-    "pytest>=7.2.0",
-    "pytest-asyncio>=0.20.3",
-    "hypothesis>=6.60.0",
-    "mypy>=0.991",
-    "black>=22.12.0",
-    "autoflake>=2.0.0",
-    "bandit>=1.7.4",
-    "isort>=5.11.4",
-    "types-pytz>=2022.7.0.0",
-    "types-requests>=2.28.11.7",
-    "types-tabulate>=0.9.0.0",
-    "types-toml>=0.10.8.1",
-    "sphinx>=6.1.2",
-    "coverage>=7.0.4",
-    "pytest-codecov>=0.5.1",
-    "codecov>=2.1.12",
+    "pre-commit>=4.6.2",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "hypothesis>=6.168.2",
+    "mypy>=2.3.1",
+    "black>=26.5.1",
+    "autoflake>=2.4.0",
+    "bandit>=1.9.4",
+    "isort>=9.0.1",
+    "types-pytz>=2026.4.0.20260926",
+    "types-requests>=2.33.0.20260906",
+    "types-tabulate>=0.10.0.20260508",
+    "types-toml>=0.10.8.20260518",
+    "coverage>=7.16.2",
+    "pytest-codecov>=0.7.0",
+    "codecov>=2.1.13",
 ]
+[dependency-groups]
+docs = ["sphinx>=9.1.0"]
+
 [tool.pdm.scripts]
 codecov = "tools/pre-release.bash"
 
@@ -83,5 +89,5 @@ write_to = "liualgotrader/__version__.py"
 excludes = ["tests"]
 
 [build-system]
-build-backend = "pdm.pep517.api"
-requires = ["pdm-pep517"]
+build-backend = "pdm.backend"
+requires = ["pdm-backend"]

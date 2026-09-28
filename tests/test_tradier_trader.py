@@ -12,14 +12,11 @@ from liualgotrader.trading.tradier import TradierTrader
 tradier_trader: TradierTrader
 
 
-@pytest.fixture
-def event_loop():
+@pytest.fixture(autouse=True)
+async def db_connection():
     global tradier_trader
-    loop = asyncio.new_event_loop()
-    loop.run_until_complete(create_db_connection())
+    await create_db_connection()
     tradier_trader = TradierTrader()
-    yield loop
-    loop.close()
 
 
 @pytest.mark.asyncio

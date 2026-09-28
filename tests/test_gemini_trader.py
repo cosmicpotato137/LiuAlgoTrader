@@ -8,14 +8,11 @@ from liualgotrader.trading.gemini import GeminiTrader
 gemini_trader: GeminiTrader
 
 
-@pytest.fixture
-def event_loop():
+@pytest.fixture(autouse=True)
+async def db_connection():
     global gemini_trader
-    loop = asyncio.new_event_loop()
-    loop.run_until_complete(create_db_connection())
+    await create_db_connection()
     gemini_trader = GeminiTrader()
-    yield loop
-    loop.close()
 
 
 @pytest.mark.asyncio

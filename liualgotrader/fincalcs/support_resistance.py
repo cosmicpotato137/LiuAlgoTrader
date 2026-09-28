@@ -121,7 +121,11 @@ async def find_resistances(
     high_index = np.where((diff[:-1] >= 0) & (diff[1:] <= 0))[0] + 1
     if len(high_index) > 0:
         local_maximas = sorted(
-            [series[i] for i in high_index if series[i] >= current_value]
+            [
+                series.iloc[i]
+                for i in high_index
+                if series.iloc[i] >= current_value
+            ]
         )
         if len(local_maximas) > 0:
             return local_maximas
@@ -189,7 +193,9 @@ def find_supports(
     diff = np.diff(series.values)
     low_index = np.where((diff[:-1] <= 0) & (diff[1:] > 0))[0] + 1
     if len(low_index) > 0:
-        return [series[x] for x in low_index if series[x] < current_value]
+        return [
+            series.iloc[x] for x in low_index if series.iloc[x] < current_value
+        ]
     return None
 
 
@@ -248,7 +254,7 @@ def find_stop(
     diff = np.diff(series.values)
     low_index = np.where((diff[:-1] <= 0) & (diff[1:] > 0))[0] + 1
     if len(low_index) > 0:
-        return series[low_index[-1]]  # - max(0.05, current_value * 0.02)
+        return series.iloc[low_index[-1]]  # - max(0.05, current_value * 0.02)
     return None  # current_value * config.default_stop
 
 
@@ -281,7 +287,7 @@ def get_local_maxima(
     return (
         pd.Series(
             index=[series.index[i] for i in high_index],
-            data=[series[i] for i in high_index],
+            data=[series.iloc[i] for i in high_index],
             dtype=np.float64,
         )
         if len(high_index) > 0

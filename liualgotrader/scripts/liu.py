@@ -25,7 +25,6 @@ main_cli
     Run the liu command-line interface and exit.
 """
 
-import asyncio
 import getopt
 import os
 import pathlib
@@ -37,6 +36,7 @@ import pygit2
 import requests
 
 from liualgotrader.common import config
+from liualgotrader.common.concurrency import get_event_loop
 from liualgotrader.common.database import create_db_connection
 from liualgotrader.models.accounts import Accounts
 from liualgotrader.models.portfolio import Portfolio
@@ -152,7 +152,7 @@ def setup_db(
         print("> ", to_run)
         os.system(to_run)
     print()
-    print("check deployment using `\psql -h localhost -p 5400 -U liu`")
+    print("check deployment using `\\psql -h localhost -p 5400 -U liu`")
 
 
 def setup_samples(
@@ -282,7 +282,7 @@ def quickstart():
 
     if already_have_db:
         print(
-            "Follow the instructions at 'https://liualgotrader.readthedocs.io/en/latest/(Advanced)%20Setup.html#database-setup' to complete your database setup."
+            "Follow the instructions at 'https://liualgotrader-v2.readthedocs.io/en/latest/(Advanced)%20Setup.html#database-setup' to complete your database setup."
         )
         restore_sample_db = False
     else:
@@ -431,7 +431,7 @@ def create_account(amount: float, credit: float):
     credit: float
         The credit line; a positive value allows a negative balance.
     """
-    loop = asyncio.get_event_loop()
+    loop = get_event_loop()
     loop.run_until_complete(create_db_connection())
     account_id = loop.run_until_complete(
         Accounts.create(amount, allow_negative=credit > 0, credit_line=credit)
@@ -450,7 +450,7 @@ def create_portfolio(amount: float, credit: float):
         The credit line.
     """
     portfolio_id = str(uuid.uuid4())
-    loop = asyncio.get_event_loop()
+    loop = get_event_loop()
     loop.run_until_complete(create_db_connection())
     loop.run_until_complete(
         Portfolio.save(

@@ -1,4 +1,3 @@
-import asyncio
 import concurrent.futures
 import time
 from datetime import datetime, timedelta
@@ -17,13 +16,6 @@ nyc = timezone("America/New_York")
 @pytest.mark.devtest
 def test_create_data_loader_default() -> bool:
     return bool(DataLoader(connector=DataConnectorType.alpaca))
-
-
-@pytest.fixture
-def event_loop():
-    loop = asyncio.new_event_loop()
-    yield loop
-    loop.close()
 
 
 @pytest.mark.devtest

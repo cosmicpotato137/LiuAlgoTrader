@@ -13,16 +13,12 @@ queues: QueueMapper
 stop: bool = False
 
 
-@pytest.fixture
-def event_loop():
+@pytest.fixture(autouse=True)
+async def stream_setup():
     global gemini_stream
     global queues
-    loop = asyncio.new_event_loop()
     queues = QueueMapper()
     gemini_stream = GeminiStream(queues)
-
-    yield loop
-    loop.close()
 
 
 def listener(q: Queue):

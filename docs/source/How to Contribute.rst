@@ -10,53 +10,78 @@ Contribution Document_ or email me at amichay@sgeltd.com.
 How to setup a development environment
 --------------------------------------
 
-Below is a step-by-step mini-guide for setting up a local development environment.
-1. clone LiuAlgoTrader:
+LiuAlgoTrader manages its dependencies with PDM_. ``pyproject.toml`` declares
+them, and ``pdm.lock`` pins the exact versions to develop and test with.
 
-.. code-block:: bash
+.. _PDM: https://pdm-project.org
 
-    git clone https://github.com/amor71/LiuAlgoTrader.git
+Prerequisites:
 
-This would create a folder `LiuAlgoTrader` with the platform code, pointing to the `master` branch.
-2. create a `virtualenv`:
+- Python 3.12 or later,
+- PDM, for example installed with ``pipx install pdm`` or ``brew install pdm``,
+- Docker Engine and Docker Compose, for the local PostgreSQL database.
 
-.. code-block:: bash
-    
-    python3 -m venv liuenv
+1. Clone LiuAlgoTrader:
 
-3. update `pip` to latest version:
+   .. code-block:: bash
 
-.. code-block:: bash
+       git clone https://github.com/amor71/LiuAlgoTrader.git
+       cd LiuAlgoTrader
 
-    pip install -U pip
+   This checks out the ``master`` branch, which is the latest development
+   version. It may not be the most stable version; the latest stable version
+   is the latest tagged version.
 
-This would create a folder `liuenv`.
+2. Install LiuAlgoTrader and the development tools:
 
-4. activate the `virtualenv`:
+   .. code-block:: bash
 
-.. code-block:: bash
+       pdm install -G dev
 
-    source liuenv/bin/activate
+   PDM creates a virtual environment in ``.venv``, installs the locked
+   dependencies into it, and installs LiuAlgoTrader in editable mode, along
+   with the ``liu``, ``trader``, ``backtester``, ``optimizer``,
+   ``market_miner`` and ``portfolio`` commands. To choose the Python
+   interpreter, run ``pdm use <path to python>`` before installing. Prefix
+   commands with ``pdm run``, or activate the environment with
+   ``source .venv/bin/activate``.
 
-5. install the packages required for development:
+3. Install the git pre-commit hook:
 
-.. code-block:: bash
+   .. code-block:: bash
 
-    pip install -r LiuAlgoTrader/liualgotrader/requirements/dev.txt
+       pdm run pre-commit install
 
-This step would download and install the latest packages required for the development. Note that `master` is the latest development branch. It may not be the most stable version. The latest stable version could be pulled from the latest tagged version.
+   On each commit, the hook runs mypy, bandit, black, isort and autoflake on
+   the staged Python files. To run the hooks on other files, use
+   ``pdm run pre-commit run --files <files>``.
 
-6. If you have not yet set up a local database:
+4. If you have not yet set up a local database, run the quickstart wizard:
 
-.. code-block:: bash
+   .. code-block:: bash
 
-    python LiuAlgoTrader/liualgotrader/liu quickstart
+       pdm run liu quickstart
 
-Follow these_ instructions on using the quickstart wizard (note that `step 1` should be omitted).
+   Follow these_ instructions, skipping `Step 1`. The wizard starts
+   PostgreSQL in Docker and sets up the environment variables that
+   LiuAlgoTrader reads. :doc:`Configuration` lists all of them.
 
-.. _these: https://liualgotrader.readthedocs.io/en/latest/Quickstart.html
+   .. _these: https://liualgotrader-v2.readthedocs.io/en/latest/Quickstart.html
 
-7. You may with to add `LiuAlgoTrader` folder to your PYTHONPATH
+5. Run the tests:
+
+   .. code-block:: bash
+
+       pdm run pytest
+       pdm run pytest tests/test_resample.py
+
+   Most tests need the database (``DSN``). Tests of a broker or data provider
+   also need its API keys, such as ``APCA_API_KEY_ID`` and
+   ``APCA_API_SECRET_KEY`` for Alpaca.
+
+To add or upgrade a dependency, run ``pdm add <package>`` or
+``pdm update <package>``, and commit both ``pyproject.toml`` and ``pdm.lock``.
+Development tools belong in the ``dev`` group: ``pdm add -G dev <package>``.
 
 
 Contributors

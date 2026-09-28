@@ -6,7 +6,7 @@ timeit
     Wrap a function so that its execution time is logged.
 """
 
-import asyncio
+import inspect
 import time
 
 from liualgotrader.common import config
@@ -38,7 +38,7 @@ def timeit(func):
         **params
             Keyword arguments for func.
         """
-        if asyncio.iscoroutinefunction(func):
+        if inspect.iscoroutinefunction(func):
             return await func(*args, **params)
         else:
             return func(*args, **params)

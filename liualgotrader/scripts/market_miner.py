@@ -24,6 +24,7 @@ import pygit2
 import toml
 
 from liualgotrader.common import config
+from liualgotrader.common.concurrency import get_event_loop
 from liualgotrader.common.database import create_db_connection
 from liualgotrader.common.tlog import tlog
 from liualgotrader.miners.base import Miner
@@ -119,8 +120,7 @@ def main_cli() -> None:
         sys.exit(0)
 
     try:
-        if not asyncio.get_event_loop().is_closed():
-            asyncio.get_event_loop().close()
+        get_event_loop().close()
         asyncio.run(main(conf_dict))
     except KeyboardInterrupt:
         tlog("market_miner.main() - Caught KeyboardInterrupt")

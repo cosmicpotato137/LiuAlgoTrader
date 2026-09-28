@@ -1,5 +1,3 @@
-import asyncio
-
 import pytest
 
 from liualgotrader.common import config
@@ -10,12 +8,9 @@ from liualgotrader.scanners.momentum import Momentum
 from liualgotrader.trading.trader_factory import trader_factory
 
 
-@pytest.fixture
-def event_loop():
-    loop = asyncio.new_event_loop()
-    loop.run_until_complete(create_db_connection())
-    yield loop
-    loop.close()
+@pytest.fixture(autouse=True)
+async def db_connection():
+    await create_db_connection()
 
 
 @pytest.mark.asyncio

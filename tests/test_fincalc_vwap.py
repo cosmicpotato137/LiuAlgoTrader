@@ -13,7 +13,7 @@ def test_add_daily_vwap_single_line() -> bool:
     start = datetime.utcnow().replace(second=0, microsecond=0)
     end = start
 
-    index = pd.date_range(start=start, end=end, freq="T")
+    index = pd.date_range(start=start, end=end, freq="min")
 
     d = {
         "open": [10],
@@ -42,7 +42,7 @@ def test_add_daily_vwap_two_line() -> bool:
     start = datetime.utcnow().replace(second=0, microsecond=0)
     end = start + timedelta(minutes=1)
 
-    index = pd.date_range(start=start, end=end, freq="T")
+    index = pd.date_range(start=start, end=end, freq="min")
 
     d = {
         "open": [10, 10],
@@ -72,7 +72,7 @@ def test_add_daily_vwap_three_line() -> bool:
     start = datetime.utcnow().replace(second=0, microsecond=0)
     end = start + timedelta(minutes=2)
 
-    index = pd.date_range(start=start, end=end, freq="T")
+    index = pd.date_range(start=start, end=end, freq="min")
 
     d = {
         "open": [10, 10, 10],
@@ -101,7 +101,7 @@ def test_anchored_vwap_three_line() -> bool:
     start = datetime.utcnow().replace(second=0, microsecond=0)
     end = start + timedelta(minutes=2)
 
-    index = pd.date_range(start=start, end=end, freq="T")
+    index = pd.date_range(start=start, end=end, freq="min")
 
     d = {
         "open": [10, 10, 10],
@@ -115,7 +115,7 @@ def test_anchored_vwap_three_line() -> bool:
     print(df)
     s = anchored_vwap(df, start, debug=True)
     print(s)
-    if s[-1] != 25.0:
-        raise AssertionError(f"Unexpected VWAP {s[-1]}")
+    if s.iloc[-1] != 25.0:
+        raise AssertionError(f"Unexpected VWAP {s.iloc[-1]}")
 
     return True

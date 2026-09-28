@@ -1,5 +1,3 @@
-import asyncio
-
 import pytest
 
 from liualgotrader.common.database import create_db_connection
@@ -8,14 +6,11 @@ from liualgotrader.trading.alpaca import AlpacaTrader
 alpaca_trader: AlpacaTrader
 
 
-@pytest.fixture
-def event_loop():
+@pytest.fixture(autouse=True)
+async def db_connection():
     global alpaca_trader
-    loop = asyncio.new_event_loop()
-    loop.run_until_complete(create_db_connection())
+    await create_db_connection()
     alpaca_trader = AlpacaTrader()
-    yield loop
-    loop.close()
 
 
 @pytest.mark.asyncio

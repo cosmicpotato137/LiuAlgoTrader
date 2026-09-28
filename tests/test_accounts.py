@@ -1,17 +1,12 @@
-import asyncio
-
 import pytest
 
 from liualgotrader.common.database import create_db_connection
 from liualgotrader.models.accounts import Accounts
 
 
-@pytest.fixture
-def event_loop():
-    loop = asyncio.new_event_loop()
-    loop.run_until_complete(create_db_connection())
-    yield loop
-    loop.close()
+@pytest.fixture(autouse=True)
+async def db_connection():
+    await create_db_connection()
 
 
 @pytest.mark.asyncio

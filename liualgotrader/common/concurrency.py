@@ -1,10 +1,14 @@
-"""Determine how many consumer processes to run.
+"""Size the consumer pool and provide the event loop for synchronous code.
 
 Functions
 ---------
 calc_num_consumer_processes
     Return how many consumer processes to launch.
+get_event_loop
+    Return the current thread's event loop, creating one if needed.
 """
+
+import asyncio
 
 import psutil
 
@@ -35,3 +39,22 @@ def calc_num_consumer_processes() -> int:
     tlog(f"Total CPU Load:{load_pct}, num_cpu:{num_cpu}")
 
     return int(5.0 * (1 - load_pct / 100.0) * num_cpu)
+
+
+def get_event_loop() -> asyncio.AbstractEventLoop:
+    """Return the current thread's event loop, creating one if needed.
+
+    Set a newly created loop as the current loop, so later calls in the same
+    thread return it. Replace the current loop if it is closed. Do not call it
+    from asynchronous code.
+    """
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = None
+
+    if loop is None or loop.is_closed():
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+    return loop

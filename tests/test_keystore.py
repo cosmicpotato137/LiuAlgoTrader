@@ -1,4 +1,3 @@
-import asyncio
 import uuid
 
 import pytest
@@ -10,12 +9,9 @@ strategy_name: str = str(uuid.uuid4())
 context: str = str(uuid.uuid4())
 
 
-@pytest.fixture
-def event_loop():
-    loop = asyncio.new_event_loop()
-    loop.run_until_complete(create_db_connection())
-    yield loop
-    loop.close()
+@pytest.fixture(autouse=True)
+async def db_connection():
+    await create_db_connection()
 
 
 @pytest.mark.asyncio

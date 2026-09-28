@@ -28,7 +28,7 @@ Alpaca is the default data-provider, Unlimited/Pro subscription is recommanded.
 Installation
 ------------
 
-To install LiuAlgoTrader type:
+LiuAlgoTrader requires Python 3.12 or later. To install LiuAlgoTrader type:
 
 .. code-block:: bash
 

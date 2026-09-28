@@ -3,7 +3,6 @@ import json
 from datetime import date, datetime, timedelta
 from typing import Dict
 
-import alpaca_trade_api as tradeapi
 import matplotlib.pyplot as plt
 import nest_asyncio
 import pandas as pd
@@ -14,6 +13,7 @@ import streamlit as st
 from liualgotrader.analytics.analysis import (calc_batch_revenue, count_trades,
                                               load_runs, load_trades)
 from liualgotrader.common import database
+from liualgotrader.data.polygon import PolygonData
 
 st.title("Day-trade Session Analysis")
 st.markdown(
@@ -116,7 +116,7 @@ for element in how_was_my_day:
 
 if st.sidebar.checkbox("Show details"):
     session = requests.session()
-    api = tradeapi.REST(base_url="https://api.alpaca.markets")
+    polygon_data = PolygonData()
 
     minute_history = {}
 
@@ -129,13 +129,11 @@ if st.sidebar.checkbox("Show details"):
                 ].value_counts()
                 for symbol, count in symbols.items():
                     if symbol not in minute_history:
-                        minute_history[symbol] = api.polygon.historic_agg_v2(
+                        minute_history[symbol] = polygon_data.get_symbol_data(
                             symbol,
-                            1,
-                            "minute",
-                            _from=day_to_analyze - timedelta(days=7),
-                            to=day_to_analyze + timedelta(days=1),
-                        ).df.tz_convert("US/Eastern")
+                            start=day_to_analyze - timedelta(days=7),
+                            end=day_to_analyze + timedelta(days=1),
+                        ).tz_convert("US/Eastern")
                         c += 1
     st.success(f"LOADED {c} symbols' data!")
 
@@ -145,23 +143,23 @@ if st.sidebar.checkbox("Show details"):
         start_date = start_date.replace(hour=9, minute=30)
         end_date = start_date.replace(hour=16, minute=00)
         try:
-            start_index = minute_history[symbol]["close"].index.get_loc(
-                start_date, method="nearest"
-            )
-            end_index = minute_history[symbol]["close"].index.get_loc(
-                end_date, method="nearest"
-            )
+            start_index = minute_history[symbol]["close"].index.get_indexer(
+                [start_date], method="nearest"
+            )[0]
+            end_index = minute_history[symbol]["close"].index.get_indexer(
+                [end_date], method="nearest"
+            )[0]
         except Exception as e:
             print(f"Error for {symbol}: {e}")
             continue
 
-        open_price = minute_history[symbol]["close"][start_index]
+        open_price = minute_history[symbol]["close"].iloc[start_index]
 
         fig, ax = plt.subplots()
         ax.plot(
-            minute_history[symbol]["close"][
-                start_index:end_index
-            ].between_time("9:30", "16:00"),
+            minute_history[symbol]["close"]
+            .iloc[start_index:end_index]
+            .between_time("9:30", "16:00"),
             label=symbol,
         )
         # fig.xticks(rotation=45)

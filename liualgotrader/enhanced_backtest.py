@@ -37,11 +37,13 @@ import uuid
 from datetime import date, datetime, timedelta
 from typing import Dict, List, Optional
 
-import alpaca_trade_api as tradeapi
 import pandas as pd
+from alpaca.trading.client import TradingClient
+from alpaca.trading.requests import GetCalendarRequest
 from pytz import timezone
 
 from liualgotrader.common import config, trading_data
+from liualgotrader.common.concurrency import get_event_loop
 from liualgotrader.common.data_loader import DataLoader  # type: ignore
 from liualgotrader.common.database import create_db_connection
 from liualgotrader.common.tlog import tlog, tlog_exception
@@ -533,12 +535,12 @@ def get_day_start_end(asset_type, day):
     Raise AssertionError for any other asset type.
     """
     if asset_type == AssetType.US_EQUITIES:
-        day_start = day.date.replace(
+        day_start = pd.Timestamp(day.date).replace(
             hour=day.open.hour,
             minute=day.open.minute,
             tzinfo=timezone("America/New_York"),
         )
-        day_end = day.date.replace(
+        day_end = pd.Timestamp(day.date).replace(
             hour=day.close.hour,
             minute=day.close.minute,
             tzinfo=timezone("America/New_York"),
@@ -706,11 +708,16 @@ async def backtest_time_range(
     ------
     Raise AssertionError for any other asset type.
     """
-    trade_api = tradeapi.REST(
-        key_id=config.alpaca_api_key, secret_key=config.alpaca_api_secret
-    )
     if asset_type == AssetType.US_EQUITIES:
-        calendars = trade_api.get_calendar(str(from_date), str(to_date))
+        trade_api = TradingClient(
+            api_key=config.alpaca_api_key,
+            secret_key=config.alpaca_api_secret,
+            paper=False,
+            url_override=config.alpaca_base_url,
+        )
+        calendars = trade_api.get_calendar(
+            GetCalendarRequest(start=from_date, end=to_date)
+        )
     elif asset_type == AssetType.CRYPTO:
         calendars = [
             t.date() for t in pd.date_range(from_date, to_date).to_list()
@@ -855,8 +862,7 @@ def backtest(
     """
     uid = str(uuid.uuid4())
     try:
-        if not asyncio.get_event_loop().is_closed():
-            asyncio.get_event_loop().close()
+        get_event_loop().close()
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(asyncio.new_event_loop())
         loop.run_until_complete(
@@ -884,4 +890,4 @@ def backtest(
         print("=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=")
         print(f"new batch-id: {uid}")
 
-        return uid
+    return uid

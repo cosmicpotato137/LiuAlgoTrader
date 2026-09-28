@@ -8,11 +8,11 @@ Hyperparameters
     A collection of parameters that spans their search grid.
 """
 
-import asyncio
 import itertools
 import uuid
 from typing import List
 
+from liualgotrader.common.concurrency import get_event_loop
 from liualgotrader.common.database import create_db_connection
 from liualgotrader.models.portfolio import Portfolio
 
@@ -98,10 +98,7 @@ class Parameter:
         amount = getattr(self, "size")
         credit = getattr(self, "credit", 0)
 
-        if asyncio.get_event_loop().is_closed():
-            loop = asyncio.new_event_loop()
-        else:
-            loop = asyncio.get_event_loop()
+        loop = get_event_loop()
 
         loop.run_until_complete(create_db_connection())
         portfolio_id = str(uuid.uuid4())

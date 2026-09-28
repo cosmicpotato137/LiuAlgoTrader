@@ -1,4 +1,3 @@
-import asyncio
 import uuid
 from datetime import date
 
@@ -13,12 +12,9 @@ from liualgotrader.scanners.base import Scanner
 from liualgotrader.strategies.base import Strategy
 
 
-@pytest.fixture
-def event_loop():
-    loop = asyncio.new_event_loop()
-    loop.run_until_complete(create_db_connection())
-    yield loop
-    loop.close()
+@pytest.fixture(autouse=True)
+async def db_connection():
+    await create_db_connection()
 
 
 @pytest.mark.asyncio

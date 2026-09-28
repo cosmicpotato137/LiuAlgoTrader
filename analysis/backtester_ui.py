@@ -5,7 +5,6 @@ asyncio.set_event_loop(loop)
 import json
 import traceback
 
-import alpaca_trade_api as tradeapi
 import matplotlib.pyplot as plt
 import pandas as pd
 import pytz
@@ -69,7 +68,6 @@ if app == "analyzer":
             st.stop()
 
         session = requests.session()
-        api = tradeapi.REST(base_url="https://api.alpaca.markets")
 
         minute_history = {}
 
@@ -97,22 +95,22 @@ if app == "analyzer":
             end_date = end_date.replace(hour=16, minute=00)
             symbol_data = minute_history[symbol][start_date:end_date]
             try:
-                start_index = symbol_data.close.index.get_loc(
-                    start_date, method="nearest"
-                )
-                end_index = symbol_data.close.index.get_loc(
-                    end_date, method="nearest"
-                )
+                start_index = symbol_data.close.index.get_indexer(
+                    [start_date], method="nearest"
+                )[0]
+                end_index = symbol_data.close.index.get_indexer(
+                    [end_date], method="nearest"
+                )[0]
             except Exception as e:
                 traceback.print_exc()
                 print(f"Error for {symbol}: {e}")
                 continue
 
-            open_price = symbol_data.close[start_index]
+            open_price = symbol_data.close.iloc[start_index]
 
             fig, ax = plt.subplots()
             ax.plot(
-                symbol_data.close[start_index:end_index],
+                symbol_data.close.iloc[start_index:end_index],
                 # .between_time("9:30", "16:00"),
                 label=symbol,
             )

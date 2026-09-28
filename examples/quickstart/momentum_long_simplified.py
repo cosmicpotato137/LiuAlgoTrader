@@ -3,7 +3,6 @@ import sys
 from datetime import datetime, timedelta
 from typing import Dict, List, Tuple
 
-import alpaca_trade_api as tradeapi
 from pandas import DataFrame as df
 from stockstats import StockDataFrame
 
@@ -132,14 +131,16 @@ class MomentumLongV3(Strategy):
 
                 sys.stdout = old_stdout  # reset old stdout
 
-                macd_trending = macd[-3] < macd[-2] < macd[-1]
-                macd_above_signal = macd[-1] > macd_signal[-1] * 1.1
+                macd_trending = macd.iloc[-3] < macd.iloc[-2] < macd.iloc[-1]
+                macd_above_signal = macd.iloc[-1] > macd_signal.iloc[-1] * 1.1
                 macd_hist_trending = (
-                    macd_hist[-3] < macd_hist[-2] < macd_hist[-1]
+                    macd_hist.iloc[-3]
+                    < macd_hist.iloc[-2]
+                    < macd_hist.iloc[-1]
                 )
 
                 if (
-                    macd[-1] > 0
+                    macd.iloc[-1] > 0
                     and macd_trending
                     and macd_above_signal
                     and macd_hist_trending
@@ -159,14 +160,14 @@ class MomentumLongV3(Strategy):
 
                     if debug:
                         tlog(
-                            f"[{self.name}][{now}] {symbol} RSI={round(rsi[-1], 2)}"
+                            f"[{self.name}][{now}] {symbol} RSI={round(rsi.iloc[-1], 2)}"
                         )
 
                     rsi_limit = 75
-                    if rsi[-1] < rsi_limit:
+                    if rsi.iloc[-1] < rsi_limit:
                         if debug:
                             tlog(
-                                f"[{self.name}][{now}] {symbol} RSI {round(rsi[-1], 2)} <= {rsi_limit}"
+                                f"[{self.name}][{now}] {symbol} RSI {round(rsi.iloc[-1], 2)} <= {rsi_limit}"
                             )
                     else:
                         tlog(
@@ -236,7 +237,7 @@ class MomentumLongV3(Strategy):
             )
 
             if data.vwap:
-                serie[-1] = data.vwap
+                serie.iloc[-1] = data.vwap
 
             old_stdout = sys.stdout  # backup current stdout
             sys.stdout = open(os.devnull, "w")
@@ -255,8 +256,8 @@ class MomentumLongV3(Strategy):
             movement = (
                 data.close - latest_scalp_basis[symbol]
             ) / latest_scalp_basis[symbol]
-            macd_val = macd[-1]
-            macd_signal_val = macd_signal[-1]
+            macd_val = macd.iloc[-1]
+            macd_signal_val = macd_signal.iloc[-1]
 
             round_factor = (
                 2 if macd_val >= 0.1 or macd_signal_val >= 0.1 else 3
@@ -274,15 +275,15 @@ class MomentumLongV3(Strategy):
                     or movement > 0.02
                 )
                 and macd_below_signal
-                and round(macd[-1], round_factor)
-                < round(macd[-2], round_factor)
+                and round(macd.iloc[-1], round_factor)
+                < round(macd.iloc[-2], round_factor)
             )
             bail_on_whipsawed = (
                 self.whipsawed.get(symbol, False)
                 and data.close > latest_cost_basis[symbol]
                 and macd_below_signal
-                and round(macd[-1], round_factor)
-                < round(macd[-2], round_factor)
+                and round(macd.iloc[-1], round_factor)
+                < round(macd.iloc[-2], round_factor)
             )
             scalp = movement > 0.04 or data.vwap > scalp_threshold
             below_cost_base = data.vwap < latest_cost_basis[symbol]
@@ -298,19 +299,19 @@ class MomentumLongV3(Strategy):
             elif (
                 below_cost_base
                 and round(macd_val, 2) < 0
-                and rsi[-1] < rsi[-2]
-                and round(macd[-1], round_factor)
-                < round(macd[-2], round_factor)
+                and rsi.iloc[-1] < rsi.iloc[-2]
+                and round(macd.iloc[-1], round_factor)
+                < round(macd.iloc[-2], round_factor)
                 and data.vwap < 0.95 * data.average
             ):
                 to_sell = True
                 sell_reasons.append(
                     "below cost & macd negative & RSI trending down and too far from VWAP"
                 )
-            elif data.close >= target_prices[symbol] and macd[-1] <= 0:
+            elif data.close >= target_prices[symbol] and macd.iloc[-1] <= 0:
                 to_sell = True
                 sell_reasons.append("above target & macd negative")
-            elif rsi[-1] >= rsi_limit:
+            elif rsi.iloc[-1] >= rsi_limit:
                 to_sell = True
                 sell_reasons.append("rsi max, cool-down for 5 minutes")
                 cool_down[symbol] = now.replace(

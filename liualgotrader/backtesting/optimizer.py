@@ -17,6 +17,7 @@ from typing import Dict
 import liualgotrader
 from liualgotrader import enhanced_backtest
 from liualgotrader.common import config
+from liualgotrader.common.concurrency import get_event_loop
 from liualgotrader.common.hyperparameter import Hyperparameters
 from liualgotrader.common.tlog import tlog
 from liualgotrader.common.types import AssetType, TimeScale
@@ -73,8 +74,7 @@ def backtest_iteration(
 
     config.build_label = liualgotrader.__version__ if hasattr(liualgotrader, "__version__") else ""  # type: ignore
     try:
-        if not asyncio.get_event_loop().is_closed():
-            asyncio.get_event_loop().close()
+        get_event_loop().close()
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(asyncio.new_event_loop())
         loop.run_until_complete(

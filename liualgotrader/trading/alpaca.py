@@ -12,13 +12,23 @@ import queue
 import time
 import traceback
 from datetime import date, datetime, timedelta
-from typing import Dict, List, Optional, Tuple
+from enum import Enum
+from typing import Any, Dict, List, Optional, Tuple, Union, cast
 
 import pandas as pd
 import requests
-from alpaca_trade_api.entity import Order as AlpacaOrder
-from alpaca_trade_api.rest import REST, URL, Entity
-from alpaca_trade_api.stream import Stream
+from alpaca.common.enums import BaseURL
+from alpaca.trading.client import TradingClient
+from alpaca.trading.enums import AssetStatus, PositionSide
+from alpaca.trading.models import Asset, Calendar
+from alpaca.trading.models import Order as AlpacaOrder
+from alpaca.trading.models import Position, TradeUpdate
+from alpaca.trading.requests import (GetCalendarRequest, LimitOrderRequest,
+                                     MarketOrderRequest, OrderRequest,
+                                     StopLimitOrderRequest, StopLossRequest,
+                                     StopOrderRequest, TakeProfitRequest,
+                                     TrailingStopOrderRequest)
+from alpaca.trading.stream import TradingStream
 from pytz import timezone
 from requests.auth import HTTPBasicAuth
 
@@ -28,6 +38,81 @@ from liualgotrader.common.types import Order, QueueMapper, Trade
 from liualgotrader.trading.base import Trader
 
 nyc = timezone("America/New_York")
+
+
+def _enum_value(field: Union[Enum, str, None]) -> str:
+    """Return the string form of an alpaca-py enum or string field.
+
+    Parameters
+    ----------
+    field: Union[Enum, str, None]
+        The field value, such as an OrderStatus or a plain string.
+
+    Returns
+    -------
+    Return an empty string for None.
+    """
+    if isinstance(field, Enum):
+        return str(field.value)
+    return field or ""
+
+
+def _status_to_event(status: Union[Enum, str, None]) -> Order.EventType:
+    """Return the Order.EventType that corresponds to an Alpaca order status.
+
+    Expired and replaced orders are reported as canceled.
+
+    Parameters
+    ----------
+    status: Union[Enum, str, None]
+        The Alpaca order status.
+    """
+    value = _enum_value(status)
+    return (
+        Order.EventType.canceled
+        if value in ["canceled", "expired", "replaced"]
+        else Order.EventType.pending
+        if value in ["pending_cancel", "pending_replace"]
+        else Order.EventType.fill
+        if value == "filled"
+        else Order.EventType.partial_fill
+        if value == "partially_filled"
+        else Order.EventType.other
+    )
+
+
+def _trading_base_url() -> str:
+    """Return the configured Alpaca trading API base URL.
+
+    Returns
+    -------
+    Return the URL without a trailing slash or API version, or the live
+    trading URL if APCA_API_BASE_URL is not set.
+    """
+    base_url = config.alpaca_base_url or BaseURL.TRADING_LIVE.value
+    return base_url.rstrip("/").removesuffix("/v2")
+
+
+def _is_paper(base_url: str) -> bool:
+    """Return True if base_url is an Alpaca paper trading URL.
+
+    Parameters
+    ----------
+    base_url: str
+        The trading API base URL.
+    """
+    return "paper" in base_url
+
+
+def _create_rest_client() -> TradingClient:
+    """Return a trading client for the configured account and base URL."""
+    base_url = _trading_base_url()
+    return TradingClient(
+        api_key=config.alpaca_api_key,
+        secret_key=config.alpaca_api_secret,
+        paper=_is_paper(base_url),
+        url_override=base_url,
+    )
 
 
 class AlpacaTrader(Trader):
@@ -49,11 +134,10 @@ class AlpacaTrader(Trader):
         The Alpaca Broker API key, or None.
     alpaca_brokage_api_secret
         The Alpaca Broker API secret, or None.
-    alpaca_rest_client
-        The REST client for the configured account.
-    alpaca_ws_client
-        The trade-update stream client, present only if a queue mapper was
-        given.
+    alpaca_rest_client: TradingClient
+        The trading client for the configured account.
+    alpaca_ws_client: Optional[TradingStream]
+        The trade-update stream client, or None if no queue mapper was given.
     running_task: Optional[asyncio.Task]
         The listener task, or None before run.
     queues
@@ -72,7 +156,7 @@ class AlpacaTrader(Trader):
     get_position
         Return the signed quantity held in a symbol.
     to_order
-        Convert an Alpaca order entity into an Order.
+        Convert an Alpaca order into an Order.
     get_order
         Return an order in the configured account.
     is_market_open_today
@@ -80,7 +164,7 @@ class AlpacaTrader(Trader):
     get_time_market_close
         Return the time left until today's close.
     reconnect
-        Replace the REST client.
+        Replace the trading client.
     run
         Start the Alpaca trade-update listener.
     close
@@ -104,14 +188,21 @@ class AlpacaTrader(Trader):
 
         Read the Broker API settings from the ALPACA_BROKER_API_BASEURL,
         ALPACA_BROKER_API_KEY and ALPACA_BROKER_API_SECRET environment
-        variables. Set market_open and market_close to None if the market does
-        not trade today. Make the new trader the shared instance.
+        variables. The clients use the APCA_API_BASE_URL endpoint, or live
+        trading if it is not set. Set market_open and market_close to None if
+        the market does not trade today. Make the new trader the shared
+        instance.
 
         Parameters
         ----------
         qm: QueueMapper, default None
             The queue mapper that receives trade updates, or None for no stream
             client.
+
+        Raises
+        ------
+        Raise ValueError if the Alpaca API key or secret is not configured,
+        and alpaca.common.exceptions.APIError if the calendar request fails.
         """
         self.market_open: Optional[datetime]
         self.market_close: Optional[datetime]
@@ -123,32 +214,31 @@ class AlpacaTrader(Trader):
             "ALPACA_BROKER_API_SECRET", None
         )
 
-        self.alpaca_rest_client = REST(
-            base_url=URL(config.alpaca_base_url),
-            key_id=config.alpaca_api_key,
-            secret_key=config.alpaca_api_secret,
-        )
+        self.alpaca_rest_client: TradingClient = _create_rest_client()
+        self.alpaca_ws_client: Optional[TradingStream] = None
         if qm:
-            self.alpaca_ws_client = Stream(
-                base_url=URL(config.alpaca_base_url),
-                key_id=config.alpaca_api_key,
+            base_url = _trading_base_url()
+            self.alpaca_ws_client = TradingStream(
+                api_key=config.alpaca_api_key,
                 secret_key=config.alpaca_api_secret,
+                paper=_is_paper(base_url),
+                url_override=f"{base_url.replace('http', 'ws', 1)}/stream",
             )
-            if not self.alpaca_ws_client:
-                raise AssertionError(
-                    "Failed to authenticate Alpaca web_socket client"
-                )
             self.alpaca_ws_client.subscribe_trade_updates(
                 AlpacaTrader.trade_update_handler
             )
         self.running_task: Optional[asyncio.Task] = None
 
         now = datetime.now(nyc)
-        calendar = self.alpaca_rest_client.get_calendar(
-            start=now.strftime("%Y-%m-%d"), end=now.strftime("%Y-%m-%d")
-        )[0]
+        calendars = cast(
+            List[Calendar],
+            self.alpaca_rest_client.get_calendar(
+                GetCalendarRequest(start=now.date(), end=now.date())
+            ),
+        )
 
-        if now.date() >= calendar.date.date():
+        if calendars and now.date() >= calendars[0].date:
+            calendar = calendars[0]
             self.market_open = now.replace(
                 hour=calendar.open.hour,
                 minute=calendar.open.minute,
@@ -179,20 +269,12 @@ class AlpacaTrader(Trader):
         -------
         Return the same tuple as is_order_completed.
         """
-        alpaca_order = self.alpaca_rest_client.get_order(order_id=order_id)
-        event = (
-            Order.EventType.canceled
-            if alpaca_order.status in ["canceled", "expired", "replaced"]
-            else Order.EventType.pending
-            if alpaca_order.status in ["pending_cancel", "pending_replace"]
-            else Order.EventType.fill
-            if alpaca_order.status == "filled"
-            else Order.EventType.partial_fill
-            if alpaca_order.status == "partially_filled"
-            else Order.EventType.other
+        alpaca_order = cast(
+            AlpacaOrder,
+            self.alpaca_rest_client.get_order_by_id(order_id=order_id),
         )
         return (
-            event,
+            _status_to_event(alpaca_order.status),
             float(alpaca_order.filled_avg_price or 0.0),
             float(alpaca_order.filled_qty or 0.0),
             0.0,
@@ -211,7 +293,9 @@ class AlpacaTrader(Trader):
         Return False if the asset cannot be looked up.
         """
         try:
-            asset_details = self.alpaca_rest_client.get_asset(symbol)
+            asset_details = cast(
+                Asset, self.alpaca_rest_client.get_asset(symbol)
+            )
         except Exception:
             return False
 
@@ -315,12 +399,18 @@ class AlpacaTrader(Trader):
 
         Returns
         -------
-        Return a DataFrame of the calendar entries, indexed by date.
+        Return a DataFrame of the calendar entries as sent by Alpaca, such as
+        the open and close times, indexed by date.
         """
-        calendars = self.alpaca_rest_client.get_calendar(
-            start=str(start_date), end=str(end_date)
+        # The Calendar model drops session_open, session_close and other
+        # fields, so read the raw entries to keep every column.
+        calendars = self.alpaca_rest_client.get(
+            "/calendar",
+            GetCalendarRequest(
+                start=start_date, end=end_date
+            ).to_request_fields(),
         )
-        _df = pd.DataFrame.from_dict([calendar._raw for calendar in calendars])
+        _df = pd.DataFrame.from_dict(calendars)
         _df["date"] = pd.to_datetime(_df.date)
         return _df.set_index("date")
 
@@ -338,44 +428,42 @@ class AlpacaTrader(Trader):
         -------
         Return a negative quantity for a short position.
         """
-        pos = self.alpaca_rest_client.get_position(symbol)
+        pos = cast(Position, self.alpaca_rest_client.get_open_position(symbol))
 
-        return float(pos.qty) if pos.side == "long" else -1.0 * float(pos.qty)
+        return (
+            float(pos.qty)
+            if pos.side == PositionSide.LONG
+            else -1.0 * float(pos.qty)
+        )
 
     def to_order(self, alpaca_order: AlpacaOrder) -> Order:
-        """Convert an Alpaca order entity into an Order.
+        """Convert an Alpaca order into an Order.
 
-        The Order has a lowercased symbol, the limit price or zero as its price
-        and a zero trade fee. Expired and replaced orders are reported as
-        canceled.
+        The Order has the order identifier as a string, a lowercased symbol,
+        the limit price or zero as its price, the submission time as a UTC
+        Timestamp and a zero trade fee. Expired and replaced orders are
+        reported as canceled.
 
         Parameters
         ----------
         alpaca_order: AlpacaOrder
-            The order entity from the Alpaca REST client.
+            The order returned by the Alpaca trading client.
         """
-        event = (
-            Order.EventType.canceled
-            if alpaca_order.status in ["canceled", "expired", "replaced"]
-            else Order.EventType.pending
-            if alpaca_order.status in ["pending_cancel", "pending_replace"]
-            else Order.EventType.fill
-            if alpaca_order.status == "filled"
-            else Order.EventType.partial_fill
-            if alpaca_order.status == "partially_filled"
-            else Order.EventType.other
-        )
+        filled_qty = float(alpaca_order.filled_qty or 0.0)
         return Order(
-            order_id=alpaca_order.id,
-            symbol=alpaca_order.symbol.lower(),
-            event=event,
+            order_id=str(alpaca_order.id),
+            symbol=(alpaca_order.symbol or "").lower(),
+            event=_status_to_event(alpaca_order.status),
             price=float(alpaca_order.limit_price or 0.0),
-            side=Order.FillSide[alpaca_order.side],
-            filled_qty=float(alpaca_order.filled_qty),
-            remaining_amount=float(alpaca_order.qty)
-            - float(alpaca_order.filled_qty),
-            submitted_at=alpaca_order.submitted_at,
-            avg_execution_price=alpaca_order.filled_avg_price,
+            side=Order.FillSide[_enum_value(alpaca_order.side)],
+            filled_qty=filled_qty,
+            remaining_amount=float(alpaca_order.qty or 0.0) - filled_qty,
+            submitted_at=pd.Timestamp(alpaca_order.submitted_at).tz_convert(
+                "UTC"
+            ),
+            avg_execution_price=float(alpaca_order.filled_avg_price)
+            if alpaca_order.filled_avg_price is not None
+            else None,
             trade_fees=0.0,
         )
 
@@ -419,7 +507,6 @@ class AlpacaTrader(Trader):
             - float(brokerage_response["filled_qty"]),
             submitted_at=pd.Timestamp(
                 ts_input=brokerage_response["submitted_at"],
-                unit="ms",
                 tz="US/Eastern",
             ),
             avg_execution_price=brokerage_response["filled_avg_price"],
@@ -435,7 +522,8 @@ class AlpacaTrader(Trader):
         order_id: str
             The Alpaca order identifier.
         """
-        return self.to_order(self.alpaca_rest_client.get_order(order_id))
+        alpaca_order = self.alpaca_rest_client.get_order_by_id(order_id)
+        return self.to_order(cast(AlpacaOrder, alpaca_order))
 
     def is_market_open_today(self) -> bool:
         """Return True if a session opening time was recorded for today."""
@@ -462,36 +550,45 @@ class AlpacaTrader(Trader):
         )
 
     async def reconnect(self):
-        """Replace the REST client with a new one.
+        """Replace the trading client with a new one.
 
-        The new client takes its base URL from the APCA_API_BASE_URL
-        environment variable or the library default, not from config. The
-        stream client is unchanged.
+        The new client uses the same base URL and keys as the original one.
+        The stream client is unchanged.
         """
-        self.alpaca_rest_client = REST(
-            key_id=config.alpaca_api_key, secret_key=config.alpaca_api_secret
-        )
+        self.alpaca_rest_client = _create_rest_client()
 
     async def run(self) -> asyncio.Task:
         """Start the Alpaca trade-update listener unless it is running.
 
-        The trader must have been created with a queue mapper.
+        The listener runs as a task in the current event loop.
 
         Returns
         -------
         Return the listener task.
+
+        Raises
+        ------
+        Raise AssertionError if the trader was created without a queue
+        mapper.
         """
+        if not self.alpaca_ws_client:
+            raise AssertionError("Must call w/ authenticated Alpaca client")
         if not self.running_task:
             tlog("starting Alpaca listener")
+            # TradingStream.run() calls asyncio.run(), which cannot be used
+            # inside the running loop, so schedule its coroutine directly.
             self.running_task = asyncio.create_task(
-                self.alpaca_ws_client._trading_ws._run_forever()
+                self.alpaca_ws_client._run_forever()
             )
         return self.running_task
 
     async def close(self):
         """Stop the Alpaca stream client if the listener was started.
 
-        The trader must have been created with a queue mapper.
+        Raises
+        ------
+        Raise AssertionError if the trader was created without a queue
+        mapper.
         """
         if not self.alpaca_ws_client:
             raise AssertionError("Must call w/ authenticated Alpaca client")
@@ -500,7 +597,7 @@ class AlpacaTrader(Trader):
 
     async def get_tradeable_symbols(self) -> List[str]:
         """Return the lowercased symbols of all tradable Alpaca assets."""
-        data = self.alpaca_rest_client.list_assets()
+        data = cast(List[Asset], self.alpaca_rest_client.get_all_assets())
         return [asset.symbol.lower() for asset in data if asset.tradable]
 
     async def get_shortable_symbols(self) -> List[str]:
@@ -508,7 +605,7 @@ class AlpacaTrader(Trader):
 
         Include only assets that are tradable, easy to borrow and shortable.
         """
-        data = self.alpaca_rest_client.list_assets()
+        data = cast(List[Asset], self.alpaca_rest_client.get_all_assets())
         return [
             asset.symbol.lower()
             for asset in data
@@ -528,11 +625,11 @@ class AlpacaTrader(Trader):
         Return False only if the asset is marked as not tradable, not shortable
         or not easy to borrow, or is inactive.
         """
-        asset = self.alpaca_rest_client.get_asset(symbol.upper())
+        asset = cast(Asset, self.alpaca_rest_client.get_asset(symbol.upper()))
         return (
             asset.tradable is not False
             and asset.shortable is not False
-            and asset.status != "inactive"
+            and asset.status != AssetStatus.INACTIVE
             and asset.easy_to_borrow is not False
         )
 
@@ -548,7 +645,7 @@ class AlpacaTrader(Trader):
         -------
         Return True; Alpaca errors propagate as exceptions.
         """
-        self.alpaca_rest_client.cancel_order(order_id)
+        self.alpaca_rest_client.cancel_order_by_id(order_id)
         return True
 
     async def _cancel_brokerage_order(
@@ -625,6 +722,8 @@ class AlpacaTrader(Trader):
     ) -> Order:
         """Submit an order for the configured account.
 
+        Prices that do not apply to the order type are ignored.
+
         Parameters
         ----------
         symbol: str
@@ -634,13 +733,13 @@ class AlpacaTrader(Trader):
         side: str
             The order direction, buy or sell.
         order_type: str
-            The order type, such as market or limit.
+            The order type: market, limit, stop, stop_limit or trailing_stop.
         time_in_force: str
             The order duration, such as day.
         limit_price: str, default None
-            The limit price, for limit orders.
+            The limit price, for limit and stop-limit orders.
         stop_price: str, default None
-            The stop price, for stop orders.
+            The stop price, for stop and stop-limit orders.
         client_order_id: str, default None
             A client-assigned order identifier.
         extended_hours: bool, default None
@@ -648,9 +747,10 @@ class AlpacaTrader(Trader):
         order_class: str, default None
             The order class, such as bracket.
         take_profit: dict, default None
-            The take-profit leg of a bracket order.
+            The take-profit leg of a bracket order, with a limit_price key.
         stop_loss: dict, default None
-            The stop-loss leg of a bracket order.
+            The stop-loss leg of a bracket order, with a stop_price key and an
+            optional limit_price key.
         trail_price: str, default None
             The trailing stop offset in dollars.
         trail_percent: str, default None
@@ -661,23 +761,45 @@ class AlpacaTrader(Trader):
         Returns
         -------
         Return the submitted order as an Order.
+
+        Raises
+        ------
+        Raise ValueError if the order type is not supported or the arguments
+        do not form a valid order, and alpaca.common.exceptions.APIError if
+        Alpaca rejects the order.
         """
-        o = self.alpaca_rest_client.submit_order(
-            symbol.upper(),
-            str(qty),
-            side,
-            order_type,
-            time_in_force,
-            limit_price,
-            stop_price,
-            client_order_id,
-            extended_hours,
-            order_class,
-            take_profit,
-            stop_loss,
-            trail_price,
-            trail_percent,
-        )
+        fields: Dict[str, Any] = {
+            "symbol": symbol.upper(),
+            "qty": qty,
+            "side": side,
+            "time_in_force": time_in_force,
+            "client_order_id": client_order_id,
+            "extended_hours": extended_hours,
+            "order_class": order_class,
+            "take_profit": TakeProfitRequest(**take_profit)
+            if take_profit
+            else None,
+            "stop_loss": StopLossRequest(**stop_loss) if stop_loss else None,
+        }
+        request: OrderRequest
+        if order_type == "market":
+            request = MarketOrderRequest(**fields)
+        elif order_type == "limit":
+            request = LimitOrderRequest(**fields, limit_price=limit_price)
+        elif order_type == "stop":
+            request = StopOrderRequest(**fields, stop_price=stop_price)
+        elif order_type == "stop_limit":
+            request = StopLimitOrderRequest(
+                **fields, stop_price=stop_price, limit_price=limit_price
+            )
+        elif order_type == "trailing_stop":
+            request = TrailingStopOrderRequest(
+                **fields, trail_price=trail_price, trail_percent=trail_percent
+            )
+        else:
+            raise ValueError(f"unsupported Alpaca order type {order_type}")
+
+        o = cast(AlpacaOrder, self.alpaca_rest_client.submit_order(request))
 
         return self.to_order(o)
 
@@ -933,7 +1055,8 @@ class AlpacaTrader(Trader):
         """Submit an order to Alpaca.
 
         For an external account, send only the symbol, quantity, side, order
-        type, limit price and time in force.
+        type, limit price and time in force. For the configured account,
+        ignore prices that do not apply to the order type.
 
         Parameters
         ----------
@@ -944,7 +1067,7 @@ class AlpacaTrader(Trader):
         side: str
             The order direction, buy or sell.
         order_type: str
-            The order type, such as market or limit.
+            The order type: market, limit, stop, stop_limit or trailing_stop.
         time_in_force: str, default "day"
             The order duration.
         limit_price: str, default None
@@ -972,6 +1095,13 @@ class AlpacaTrader(Trader):
         Returns
         -------
         Return the submitted order as an Order.
+
+        Raises
+        ------
+        For the configured account, raise ValueError if the arguments do not
+        form a valid order and alpaca.common.exceptions.APIError if Alpaca
+        rejects it. For an external account, raise AssertionError if the
+        request fails.
         """
         if on_behalf_of:
             return await self._order_on_behalf(
@@ -1011,57 +1141,53 @@ class AlpacaTrader(Trader):
             )
 
     @classmethod
-    def _trade_from_dict(cls, trade_dict: Entity) -> Optional[Trade]:
-        """Convert an Alpaca trade-update entity into a Trade.
+    def _trade_from_dict(cls, trade_dict: TradeUpdate) -> Optional[Trade]:
+        """Convert an Alpaca trade update into a Trade.
 
-        The Trade has a lowercased symbol without slashes, reports suspended,
-        expired and cancel_rejected events as canceled, and has a zero quantity
-        unless the event is a fill.
+        The Trade has the order identifier as a string, a lowercased symbol
+        without slashes and the order's update time in US/Eastern. It reports
+        suspended, expired and cancel_rejected events as canceled, and has a
+        zero quantity unless the event is a fill.
 
         Parameters
         ----------
-        trade_dict: Entity
-            The trade-update entity from the Alpaca stream.
+        trade_dict: TradeUpdate
+            The trade update from the Alpaca stream.
 
         Returns
         -------
         Return None for a new-order event.
         """
-        if trade_dict.event == "new":
+        event = _enum_value(trade_dict.event)
+        if event == "new":
             return None
 
-        symbol = trade_dict.order["symbol"].lower().replace("/", "")
+        order = trade_dict.order
+        symbol = (order.symbol or "").lower().replace("/", "")
         return Trade(
-            order_id=trade_dict.order["id"],
+            order_id=str(order.id),
             symbol=symbol,
             event=Order.EventType.canceled
-            if trade_dict.event
-            in ["canceled", "suspended", "expired", "cancel_rejected"]
+            if event in ["canceled", "suspended", "expired", "cancel_rejected"]
             else Order.EventType.rejected
-            if trade_dict.event == "rejected"
+            if event == "rejected"
             else Order.EventType.fill
-            if trade_dict.event == "fill"
+            if event == "fill"
             else Order.EventType.partial_fill
-            if trade_dict.event == "partial_fill"
+            if event == "partial_fill"
             else Order.EventType.other,
-            filled_qty=float(trade_dict.qty)
-            if trade_dict.event in ["fill", "partial_fill"]
+            filled_qty=float(trade_dict.qty or 0.0)
+            if event in ["fill", "partial_fill"]
             else 0.0,
             trade_fee=0.0,
-            filled_avg_price=float(
-                trade_dict.order["filled_avg_price"] or 0.0
-            ),
+            filled_avg_price=float(order.filled_avg_price or 0.0),
             liquidity="",
-            updated_at=pd.Timestamp(
-                ts_input=trade_dict.order["updated_at"],
-                unit="ms",
-                tz="US/Eastern",
-            ),
-            side=Order.FillSide[trade_dict.order["side"]],
+            updated_at=pd.Timestamp(order.updated_at).tz_convert("US/Eastern"),
+            side=Order.FillSide[_enum_value(order.side)],
         )
 
     @classmethod
-    async def trade_update_handler(cls, data):
+    async def trade_update_handler(cls, data: TradeUpdate):
         """Forward an Alpaca trade update to every consumer queue.
 
         Send a trade_update message with the symbol and Trade fields, ignoring
@@ -1069,8 +1195,8 @@ class AlpacaTrader(Trader):
 
         Parameters
         ----------
-        data
-            The trade-update entity from the Alpaca stream.
+        data: TradeUpdate
+            The trade update from the Alpaca stream.
 
         Raises
         ------
@@ -1095,7 +1221,7 @@ class AlpacaTrader(Trader):
 
         except queue.Full as f:
             tlog(
-                f"[EXCEPTION] process_message(): queue for {trade.symbol} is FULL:{f}, sleeping for 2 seconds and re-trying."
+                f"[EXCEPTION] process_message(): queue for {data.order.symbol} is FULL:{f}, sleeping for 2 seconds and re-trying."
             )
             raise
         # except AssertionError:

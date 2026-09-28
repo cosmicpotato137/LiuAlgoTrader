@@ -35,11 +35,11 @@ dedicated PostgreSQL setup (local, hosted, or managed) vs. running in the Docker
  
 **Running Liu applications**
  
-`pip install liualgotrader` installs 4 executables scripts (a.k.a applications): **liu**, **trader**, **backtester** and **optimizer**.
-On Windows (unlike Linux), it is not possible to execute the application by typing its name. You need to type `python <path>\liu`.
-Where <path> depends on your local setup.
+`pip install liualgotrader` installs 6 applications: **liu**, **trader**, **backtester**, **optimizer**,
+**market_miner** and **portfolio**. On Windows, they are installed as `.exe` files in the `Scripts` folder of
+the Python environment, so you can run them by name once the environment is activated.
  
-For example, assuming you have Python 3.9.x installed on your Windows machine, follow the steps bellow to
+For example, assuming you have Python 3.12 or later installed on your Windows machine, follow the steps below to
 create a dedicated `virtual environment` for Liu:
  
  .. code-block:: bash
@@ -47,7 +47,7 @@ create a dedicated `virtual environment` for Liu:
     python -m venv liu
     liu\Scripts\activate
     pip install liualgotrader
-    python liu\Scripts\liu quickstart
+    liu quickstart
 
 Good Luck!
 
@@ -71,7 +71,7 @@ Use this for Windows PowerShell:
 Q : How to install on Ubuntu?
 -----------------------------
 
-I would like to install `liu` on Ubuntu 20.10. Can you please list the steps I need to take?
+I would like to install `liu` on Ubuntu. Can you please list the steps I need to take?
 
 Answer
 ******
@@ -96,21 +96,29 @@ After successful completion of the above steps, you should logout and login.
     $ sudo curl -L "https://github.com/docker/compose/releases/download/1.28.4/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
     $ sudo chmod +x /usr/local/bin/docker-compose
 
-**STEP 3**: Install Python3.9 and basic tools
+**STEP 3**: Install Python 3.12 or later and basic tools
+
+Ubuntu 24.04 and later include a supported Python:
+
+.. code-block:: bash
+
+    $ sudo apt update
+    $ sudo apt install python3 python3-pip python3-venv
+
+On older releases, install a newer Python from the deadsnakes PPA, and use
+`python3.14` instead of `python3` in STEP 4:
 
 .. code-block:: bash
 
     $ sudo add-apt-repository ppa:deadsnakes/ppa
     $ sudo apt update
-    $ sudo apt install python3.9
-    $ sudo apt install python3-pip
-    $ sudo apt install python3.9-venv
+    $ sudo apt install python3.14 python3.14-venv
 
 **STEP 4**: Install LiuAlgoTrader 
 
 .. code-block:: bash
 
-    $ python3.9 -m venv liu
+    $ python3 -m venv liu
     $ source liu/bin/activate
     (liu) $ mkdir liu-dev ; cd liu-dev
     (liu) $ pip install liualgotrader

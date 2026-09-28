@@ -30,6 +30,7 @@ import fire
 from tabulate import tabulate
 
 from liualgotrader.analytics import analysis
+from liualgotrader.common.concurrency import get_event_loop
 from liualgotrader.common.database import create_db_connection
 from liualgotrader.common.types import AssetType
 from liualgotrader.models.portfolio import Portfolio
@@ -163,7 +164,7 @@ def trades(portfolio_id):
 def list():
     """List the active portfolios."""
     data = []
-    loop = asyncio.get_event_loop()
+    loop = get_event_loop()
     loop.run_until_complete(create_db_connection())
     print("Portfolio(s):")
     data = loop.run_until_complete(Portfolio.list_portfolios())

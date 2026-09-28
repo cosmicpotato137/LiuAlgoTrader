@@ -1,4 +1,3 @@
-import asyncio
 import time
 from datetime import date, datetime
 
@@ -17,12 +16,9 @@ from liualgotrader.common.types import TimeScale
 from liualgotrader.trading.alpaca import AlpacaTrader
 
 
-@pytest.fixture
-def event_loop():
-    loop = asyncio.new_event_loop()
-    loop.run_until_complete(create_db_connection())
-    yield loop
-    loop.close()
+@pytest.fixture(autouse=True)
+async def db_connection():
+    await create_db_connection()
 
 
 @pytest.mark.asyncio

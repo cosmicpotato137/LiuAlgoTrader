@@ -6,11 +6,10 @@ account_transactions
     Rebuild the account transactions of a portfolio.
 """
 
-import asyncio
-
 import pytz
 
 from liualgotrader.analytics.analysis import load_trades_by_portfolio
+from liualgotrader.common.concurrency import get_event_loop
 from liualgotrader.models.accounts import Accounts
 from liualgotrader.models.portfolio import Portfolio
 
@@ -49,7 +48,7 @@ def account_transactions(portfolio_id: str):
     portfolio_id: str
         The portfolio to rebuild.
     """
-    loop = asyncio.get_event_loop()
+    loop = get_event_loop()
     _ = loop.run_until_complete(Portfolio.load_by_portfolio_id(portfolio_id))
     account_id, account_size = loop.run_until_complete(
         Portfolio.load_details(portfolio_id)

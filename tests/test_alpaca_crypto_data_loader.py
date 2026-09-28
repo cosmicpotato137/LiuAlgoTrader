@@ -2,7 +2,7 @@ from datetime import date, timedelta
 
 import pandas as pd
 import pytest
-from alpaca_trade_api.rest import TimeFrame
+from alpaca.data.timeframe import TimeFrame
 from pytz import timezone
 
 from liualgotrader.common import config

@@ -5,6 +5,21 @@ email, or any other method with the owners of this repository before making a ch
 
 Please note we have a code of conduct, please follow it in all your interactions with the project.
 
+## Development Setup
+
+LiuAlgoTrader uses [PDM](https://pdm-project.org) to manage dependencies, and needs Python 3.12 or later:
+
+```sh
+git clone https://github.com/amor71/LiuAlgoTrader.git
+cd LiuAlgoTrader
+pdm install -G dev             # create .venv with the locked dependencies and dev tools
+pdm run pre-commit install     # run mypy, bandit, black, isort and autoflake on each commit
+pdm run liu quickstart         # optional: local PostgreSQL in Docker plus environment variables
+```
+
+See [How to setup a development environment](https://liualgotrader-v2.readthedocs.io/en/latest/How%20to%20Contribute.html#how-to-setup-a-development-environment)
+for details, including which tests need the database and API keys.
+
 ## Pull Request Process
 
 1. Ensure any install or build dependencies are removed before the end of the layer when doing a 

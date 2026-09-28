@@ -1,0 +1,30 @@
+# Install the git hook with `pdm run pre-commit install`. The hooks run the
+# tools from the locked dev dependencies through `pdm run`.
+repos:
+  - repo: local
+    hooks:
+      - id: mypy
+        name: mypy
+        entry: pdm run mypy --namespace-packages --show-error-context --pretty --strict-optional --ignore-missing-imports
+        language: unsupported
+        types: [python]
+      - id: bandit
+        name: bandit
+        entry: pdm run bandit -s B605 -ii
+        language: unsupported
+        types: [python]
+      - id: black
+        name: black
+        entry: pdm run black -l 79 --target-version py312
+        language: unsupported
+        types: [python]
+      - id: isort
+        name: isort
+        entry: pdm run isort
+        language: unsupported
+        types: [python]
+      - id: autoflake
+        name: autoflake
+        entry: pdm run autoflake --in-place --remove-unused-variables
+        language: unsupported
+        types: [python]

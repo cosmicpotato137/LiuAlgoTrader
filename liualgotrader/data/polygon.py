@@ -8,22 +8,35 @@ PolygonStream
     Streaming provider for the Polygon WebSocket API.
 """
 
+import asyncio
 import json
 import queue
 import traceback
 from datetime import date, datetime
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Optional, Union
 
 import numpy as np
 import pandas as pd
-import requests
 from polygon import RESTClient, WebSocketClient
+from polygon.exceptions import AuthError
+from polygon.websocket.models import Feed, Market
 
 from liualgotrader.common import config
 from liualgotrader.common.tlog import tlog
 from liualgotrader.common.types import QueueMapper, TimeScale, WSEventType
 from liualgotrader.data.data_base import DataAPI
 from liualgotrader.data.streaming_base import StreamingAPI
+
+# Polygon websocket channel prefix of each event type
+_WS_CHANNELS: Dict[WSEventType, str] = {
+    WSEventType.SEC_AGG: "A",
+    WSEventType.MIN_AGG: "AM",
+    WSEventType.TRADE: "T",
+    WSEventType.QUOTE: "Q",
+}
+
+# seconds to wait for the stream task to end after closing the websocket
+_CLOSE_TIMEOUT = 5.0
 
 
 class PolygonData(DataAPI):
@@ -67,13 +80,15 @@ class PolygonData(DataAPI):
 
         Raises
         ------
-        Raise AssertionError if the client cannot be created.
+        Raise AssertionError if the client cannot be created, such as when
+        config.polygon_api_key is not set.
         """
-        self.polygon_rest_client = RESTClient(config.polygon_api_key)
-        if not self.polygon_rest_client:
+        try:
+            self.polygon_rest_client = RESTClient(config.polygon_api_key)
+        except AuthError as e:
             raise AssertionError(
                 "Failed to authenticate Polygon restful client"
-            )
+            ) from e
 
     async def get_market_snapshot(
         self, filter_func: Optional[Callable]
@@ -87,6 +102,12 @@ class PolygonData(DataAPI):
         filter_func: Optional[Callable]
             A predicate that selects snapshots, or None for all.
 
+        Returns
+        -------
+        Return each snapshot as the dict sent by Polygon, keyed by the Polygon
+        field names such as ticker, day, lastTrade, prevDay and
+        todaysChangePerc.
+
         Raises
         ------
         Raise AssertionError if the REST client is missing.
@@ -94,11 +115,14 @@ class PolygonData(DataAPI):
         if not self.polygon_rest_client:
             raise AssertionError("Must call w/ authenticated polygon client")
         # this API endpoint requires at least starter subscriptions from Polygon
-        data = self.polygon_rest_client.stocks_equities_snapshot_all_tickers()
+        response = self.polygon_rest_client.get_snapshot_all(
+            "stocks", raw=True
+        )
+        tickers = json.loads(response.data.decode("utf-8")).get("tickers", [])
         return (
-            list(filter(filter_func, data.tickers))
+            list(filter(filter_func, tickers))
             if filter_func is not None
-            else data.tickers
+            else tickers
         )
 
     def get_symbols(self) -> List[str]:
@@ -110,23 +134,12 @@ class PolygonData(DataAPI):
         """
         if not self.polygon_rest_client:
             raise AssertionError("Must call w/ authenticated polygon client")
-        # parse symbols on the first page
-        data = self.polygon_rest_client.reference_tickers_v3(
-            limit=1000, active=True
+        # the client iterates over every page of the response
+        tickers = self.polygon_rest_client.list_tickers(
+            active=True, limit=1000
         )
-        # use set to deduplicate in case paginated response return duplicate symbols
-        symbols = {d["ticker"] for d in data.results}
-        next_url = f"{data.next_url}&apiKey={config.polygon_api_key}"
-        # parse the pagination
-        while True:
-            response = requests.get(next_url).json()
-            if "next_url" not in response:
-                break
-            symbols.update([d["ticker"] for d in response["results"]])
-            next_url = (
-                f"{response['next_url']}&apiKey={config.polygon_api_key}"
-            )
-        return list(symbols)
+        # use set to deduplicate in case pages return duplicate symbols
+        return list({ticker.ticker for ticker in tickers})
 
     def get_symbol_data(
         self,
@@ -162,25 +175,28 @@ class PolygonData(DataAPI):
         if not self.polygon_rest_client:
             raise AssertionError("Must call w/ authenticated polygon client")
 
-        data = self.polygon_rest_client.stocks_equities_aggregates(
-            symbol, 1, scale.name, start, end, unadjusted=False, limit=50000
+        # the client iterates over every page of the response
+        aggs = list(
+            self.polygon_rest_client.list_aggs(
+                symbol, 1, scale.name, start, end, adjusted=True, limit=50000
+            )
         )
-        if not data or not hasattr(data, "results"):
+        if not aggs:
             raise ValueError(
                 f"[ERROR] {symbol} has no data for {start} to {end} w {scale.name}"
             )
 
         d = {
-            pd.Timestamp(result["t"], unit="ms", tz="America/New_York"): [
-                result.get("o"),
-                result.get("h"),
-                result.get("l"),
-                result.get("c"),
-                result.get("v"),
-                result.get("vw"),
-                result.get("n"),
+            pd.Timestamp(agg.timestamp, unit="ms", tz="America/New_York"): [
+                agg.open,
+                agg.high,
+                agg.low,
+                agg.close,
+                agg.volume,
+                agg.vwap,
+                agg.transactions,
             ]
-            for result in data.results
+            for agg in aggs
         }
         df = pd.DataFrame.from_dict(
             d,
@@ -195,7 +211,9 @@ class PolygonData(DataAPI):
                 "count",
             ],
         )
-        df["vwap"] = np.NaN
+        # pandas 3 infers millisecond resolution from the timestamps
+        df.index = df.index.as_unit("ns")
+        df["vwap"] = np.nan
         return df
 
     def get_symbols_data(
@@ -228,13 +246,11 @@ class PolygonData(DataAPI):
         symbol: str
             The ticker.
         """
-        snapshot_data = (
-            self.polygon_rest_client.stocks_equities_snapshot_single_ticker(
-                symbol
-            )
+        snapshot = self.polygon_rest_client.get_snapshot_ticker(
+            "stocks", symbol
         )
         return pd.Timestamp(
-            snapshot_data.ticker.last_trade.timestamp_of_this_trade,
+            snapshot.last_trade.sip_timestamp,
             unit="ns",
             tz="America/New_York",
         )
@@ -304,22 +320,24 @@ class PolygonStream(StreamingAPI):
     """StreamingAPI implementation backed by the Polygon websocket.
 
     Aggregate, trade and quote events are relayed to the per-symbol queues with
-    descriptive field names added. The connection starts when the object is
-    created.
+    descriptive field names added. The connection starts when run is called,
+    and subscriptions made before then take effect once it is established.
 
     Attributes
     ----------
     polygon_ws_client
         The Polygon websocket client.
+    task: Optional[asyncio.Task]
+        The background streaming task, or None before run.
 
     Methods
     -------
     subscribe
         Subscribe symbols to event types.
     run
-        Do nothing, as the client starts on creation.
+        Start streaming in the background.
     unsubscribe
-        Raise NotImplementedError.
+        Unsubscribe a symbol from every event type.
     close
         Close the websocket connection.
     handle_event
@@ -333,7 +351,7 @@ class PolygonStream(StreamingAPI):
     """
 
     def __init__(self, queues: QueueMapper):
-        """Start the Polygon websocket client and register the shared instance.
+        """Create the websocket client and register the shared instance.
 
         Parameters
         ----------
@@ -342,19 +360,21 @@ class PolygonStream(StreamingAPI):
 
         Raises
         ------
-        Raise AssertionError if the client cannot be created.
+        Raise AssertionError if the client cannot be created, such as when
+        config.polygon_api_key is not set.
         """
-        self.polygon_ws_client = WebSocketClient(
-            auth_key=config.polygon_api_key,
-            process_message=PolygonStream.process_message,
-            on_close=PolygonStream.on_close,
-            on_error=PolygonStream.on_error,
-        )
-        if not self.polygon_ws_client:
+        try:
+            self.polygon_ws_client = WebSocketClient(
+                api_key=config.polygon_api_key,
+                feed=Feed.RealTime,
+                market=Market.Stocks,
+                raw=True,
+            )
+        except AuthError as e:
             raise AssertionError(
                 "Failed to authenticate Polygon web_socket client"
-            )
-        self.polygon_ws_client.run()
+            ) from e
+        self.task: Optional[asyncio.Task] = None
         super().__init__(queues)
 
     async def subscribe(
@@ -365,7 +385,7 @@ class PolygonStream(StreamingAPI):
         Parameters
         ----------
         symbols: List[str]
-            The symbols to subscribe.
+            The symbols to subscribe, in any case.
         events: List[WSEventType]
             The aggregate, trade and quote event types.
 
@@ -373,19 +393,11 @@ class PolygonStream(StreamingAPI):
         -------
         Return True.
         """
-        args = []
-        for symbol in symbols:
-            for event in events:
-                if event == WSEventType.SEC_AGG:
-                    action = "A"
-                elif event == WSEventType.MIN_AGG:
-                    action = "AM"
-                elif event == WSEventType.TRADE:
-                    action = "T"
-                elif event == WSEventType.QUOTE:
-                    action = "Q"
-
-                args.append(f"{action}.{symbol}")
+        args = [
+            f"{_WS_CHANNELS[event]}.{symbol.upper()}"
+            for symbol in symbols
+            for event in events
+        ]
 
         tlog(f"subscribe(): adding subscription {args}")
         self.polygon_ws_client.subscribe(*args)
@@ -393,24 +405,80 @@ class PolygonStream(StreamingAPI):
         return True
 
     async def run(self):
-        """Do nothing, as the websocket client starts on creation."""
-        pass
+        """Start streaming in the background unless a stream is running."""
+        if self.task is None or self.task.done():
+            self.task = asyncio.create_task(
+                self._stream(), name="PolygonStream"
+            )
 
     async def unsubscribe(self, symbol: str) -> bool:
-        """Raise NotImplementedError, as unsubscribing is unsupported.
+        """Unsubscribe a symbol from every event type.
 
         Parameters
         ----------
         symbol: str
-            The symbol to unsubscribe.
+            The symbol to unsubscribe, in any case.
+
+        Returns
+        -------
+        Return True.
         """
-        raise NotImplementedError("not implemented yet")
+        args = [
+            f"{channel}.{symbol.upper()}" for channel in _WS_CHANNELS.values()
+        ]
+
+        tlog(f"unsubscribe(): removing subscription {args}")
+        self.polygon_ws_client.unsubscribe(*args)
+
+        return True
 
     async def close(
         self,
     ) -> None:
-        """Close the Polygon websocket connection."""
-        self.polygon_ws_client.close_connection()
+        """Close the Polygon websocket connection and stop streaming."""
+        if self.polygon_ws_client.websocket:
+            await self.polygon_ws_client.close()
+            if self.task:
+                await asyncio.wait({self.task}, timeout=_CLOSE_TIMEOUT)
+
+        if self.task and not self.task.done():
+            self.task.cancel()
+            await asyncio.gather(self.task, return_exceptions=True)
+
+    async def _stream(self) -> None:
+        """Relay Polygon messages to the queues until the connection ends.
+
+        Report errors to on_error and the end of the connection to on_close
+        instead of raising them.
+        """
+        try:
+            await self.polygon_ws_client.connect(PolygonStream._on_message)
+        except Exception as e:
+            PolygonStream.on_error(self.polygon_ws_client.websocket, e)
+        finally:
+            ws = self.polygon_ws_client.websocket
+            PolygonStream.on_close(
+                ws,
+                getattr(ws, "close_code", None),
+                getattr(ws, "close_reason", None),
+            )
+
+    @classmethod
+    async def _on_message(cls, message: Union[str, bytes]) -> None:
+        """Handle one message, reporting any error to on_error.
+
+        The message is handled in a worker thread, so a full queue does not
+        block the event loop.
+
+        Parameters
+        ----------
+        message: Union[str, bytes]
+            The JSON text of a list of events.
+        """
+        try:
+            await asyncio.to_thread(cls.process_message, message)
+        except Exception as e:
+            cls.on_error(None, e)
 
     @classmethod
     def handle_event(cls, event: Dict):
@@ -475,7 +543,7 @@ class PolygonStream(StreamingAPI):
         Parameters
         ----------
         message
-            The JSON text of a list of events.
+            The JSON text of a list of events, as str or bytes.
         """
         payload = json.loads(message)
         for event in payload:
